@@ -160,10 +160,28 @@ def _with_camera_override(cfg, *, index: int | None = None, backend: str | None 
 
 
 def _list_cameras_only() -> int:
-    """Delegate to scripts/list_cameras.py via subprocess so it parses its own argv."""
+    """Delegate to scripts/list_cameras.py via subprocess with no argv pollution.
+
+    Forwards only --max-index (the only flag list_cameras.py understands);
+    anything else from sys.argv is intentionally dropped so callers don't have
+    to know the inner script's arg parser.
+    """
     import subprocess
+    argv = sys.argv[1:]
+    forwarded: list[str] = []
+    skip_next = False
+    for tok in argv:
+        if skip_next:
+            skip_next = False
+            continue
+        if tok in ("--max-index", "-w", "-h") or tok.startswith("--max-index="):
+            forwarded.append(tok)
+            if "=" not in tok:
+                skip_next = True
+        elif tok.startswith("--width=") or tok.startswith("--height="):
+            forwarded.append(tok)
     script = Path(__file__).resolve().parents[1] / "scripts" / "list_cameras.py"
-    return subprocess.call([sys.executable, str(script)] + sys.argv[1:])
+    return subprocess.call([sys.executable, str(script)] + forwarded)
 
 
 def _hud_record(hud: HudState, guard_name: str, analyzed_fps: float, camera_fps: float,

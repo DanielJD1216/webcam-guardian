@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Two-tier webcam guardian: free local vision guard + bring-your-own OpenAI-compatible detective."
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.11,<3.14"
 authors = [{name = "Webcam Guardian contributors"}]
 dependencies = [
   "opencv-python>=4.10",
@@ -15,6 +15,7 @@ dependencies = [
   "python-dotenv>=1.0",
   "PyYAML>=6.0",
   "psutil>=5.9",
+  "Pillow>=10.0",
 ]
 
 [project.optional-dependencies]
