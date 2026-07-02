@@ -1,5 +1,3 @@
-# Webcam Guardian
-
 <p align="center">
   <img src="docs/banner.png" alt="webcam-guardian — local RT-DETR guard + bring-your-own detective" width="900">
 </p>
