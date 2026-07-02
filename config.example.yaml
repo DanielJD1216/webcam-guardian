@@ -12,11 +12,12 @@ guard:
   backend: rtdetr          # rtdetr (default, Apache-2.0) | yolo11n (extra, AGPL) | locateanything (experimental)
   device: auto             # auto → mps on Apple Silicon, cuda on NVIDIA, else cpu
   analyzed_fps: 5          # target analysis rate (actual rate shown in HUD & logged)
-  conf_threshold: 0.4
+  conf_threshold: 0.55     # raise this if boxes flicker in/out on shadows; lower to catch more
+  draw_min_streak: 2       # require label present N consecutive analyzed frames before drawing
   draw_classes: [person, dog, car]
   trigger_classes: [person, car]
   coco_ids: {person: [0], car: [2, 5, 7], dog: [16]}   # bus/truck count as "car" (delivery vans!)
-  la_command: []           # experimental LocateAnything port launch command; empty = backend unavailable
+  la_command: []           # experimental LocateAnything port launch command (§5.3); empty = backend unavailable
   la_input_long_side: 960
 
 escalation:

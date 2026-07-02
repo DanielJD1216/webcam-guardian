@@ -1,6 +1,13 @@
 """Overlay — bounding boxes, labels, HUD (fps, call counts, cooldown state).
 
 Per BUILD-PLAN.md §9.
+
+Streak smoothing (draw_min_streak): RT-DETR can flicker detections between
+analyzed frames (shadows, edges, lighting). To stabilize the live preview,
+a label must be present in `draw_min_streak` consecutive analyzed frames
+before its box is drawn. The underlying detector still fires every frame
+(so escalation, logs, etc. see every detection) — only the visualization
+is smoothed.
 """
 
 from __future__ import annotations
@@ -14,7 +21,6 @@ import cv2
 from .guard.base import Detection
 
 
-# Distinct colors per class — keeps the recording legible.
 CLASS_COLORS: dict[str, tuple[int, int, int]] = {
     "person": (0, 200, 0),
     "dog":    (255, 140, 0),
@@ -31,6 +37,25 @@ class HudState:
     cooldowns: dict[str, float] = field(default_factory=dict)
     last_decision_summary: str = ""
     banner: tuple[str, float] = ("", 0.0)  # message, expires_at_monotonic
+
+
+class LabelStreakTracker:
+    """Counts consecutive analyzed frames where each label has been present."""
+
+    def __init__(self) -> None:
+        self._streak: dict[str, int] = {}
+
+    def observe(self, present_labels: Iterable[str], min_streak: int) -> set[str]:
+        present = set(present_labels)
+        allowed: set[str] = set()
+        for lab in present:
+            self._streak[lab] = self._streak.get(lab, 0) + 1
+            if self._streak[lab] >= max(1, min_streak):
+                allowed.add(lab)
+        for lab in list(self._streak.keys()):
+            if lab not in present:
+                self._streak[lab] = 0
+        return allowed
 
 
 def _draw_hud(frame, hud: HudState) -> None:
@@ -72,9 +97,11 @@ def _draw_hud(frame, hud: HudState) -> None:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 240, 120), 2, cv2.LINE_AA)
 
 
-def _draw_boxes(frame, detections: Iterable[Detection], draw_classes: Sequence[str]) -> None:
+def _draw_boxes(frame, detections: Iterable[Detection],
+                draw_classes: Sequence[str],
+                allowed_labels: set[str]) -> None:
     for d in detections:
-        if d.label not in draw_classes:
+        if d.label not in draw_classes or d.label not in allowed_labels:
             continue
         x1, y1, x2, y2 = (int(v) for v in d.box)
         color = CLASS_COLORS.get(d.label, (200, 200, 200))
@@ -86,9 +113,19 @@ def _draw_boxes(frame, detections: Iterable[Detection], draw_classes: Sequence[s
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1, cv2.LINE_AA)
 
 
-def draw(frame, detections: Iterable[Detection], draw_classes: Sequence[str], hud: HudState) -> None:
-    _draw_boxes(frame, detections, draw_classes)
+def draw(frame, detections: Iterable[Detection], draw_classes: Sequence[str],
+         hud: HudState, streak_tracker: LabelStreakTracker,
+         min_streak: int = 2) -> set[str]:
+    """Update the streak tracker and draw boxes only for stabilized labels.
+
+    Returns the set of labels currently allowed to draw (also written into
+    hud.cooldowns-ish stream if you want to surface them).
+    """
+    present = {d.label for d in detections}
+    allowed = streak_tracker.observe(present, min_streak)
+    _draw_boxes(frame, detections, draw_classes, allowed)
     _draw_hud(frame, hud)
+    return allowed
 
 
 def set_banner(hud: HudState, text: str, seconds: float = 2.0) -> None:

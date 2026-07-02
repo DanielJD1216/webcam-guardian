@@ -35,7 +35,7 @@ from .guard.base import Detection, GuardBackend
 from .guard.rtdetr import RTDetrGuard
 from .guard.yolo import YoloGuard
 from .guard.la_client import LocateAnythingGuard
-from .overlay import HudState, draw as draw_overlay, set_banner
+from .overlay import HudState, draw as draw_overlay, LabelStreakTracker, set_banner
 from .storage import EventLog, snapshot_save
 from .alerts.base import dispatch as dispatch_alerts
 from .alerts.factory import build_channels
@@ -263,6 +263,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     worker.start()
 
     hud = HudState()
+    streak = LabelStreakTracker()
     set_banner(hud, f"READY — guard={guard.name}", 2.0)
     last_analysis = 0.0
     last_guard_stats = 0.0
@@ -337,7 +338,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                         escalator.stats.calls_dispatched,
                         escalator.snapshot_cooldowns(now),
                         last_decision_summary)
-            draw_overlay(frame, detect_to_draw, cfg.guard.draw_classes, hud)
+            draw_overlay(frame, detect_to_draw, cfg.guard.draw_classes, hud,
+                         streak, min_streak=cfg.guard.draw_min_streak)
             cv2.imshow("Webcam Guardian", frame)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
