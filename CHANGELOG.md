@@ -6,7 +6,74 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.1.0] — 2026-07-01
+## [0.2.0] — 2026-07-02
+
+Camera hardening, box-coord fix, demo-runner.
+
+### Added
+
+- **Camera selection** — `python -m guardian --camera-index N` /
+  `--camera-backend NAME` overrides config at runtime without editing the
+  yaml. `python -m guardian --list-cameras` (or `scripts/list_cameras.py`)
+  probes indices 0..N and prints each camera's native resolution vs the
+  requested one — that split is how you spot placeholder feeds (most real
+  cameras honor a smaller requested resolution; placeholders return their
+  fixed size regardless).
+- **`scripts/preview_camera.py`** — open a single index in a labeled
+  OpenCV window for 3 s so you can identify which physical camera an
+  index corresponds to.
+- **`scripts/debug_detect.py`** — one-shot diagnostic that bypasses both
+  `conf_threshold` and `draw_min_streak`, prints every detection (label,
+  conf, box, size), and saves an annotated JPEG. `--show-all` drops conf
+  to ~0 so you can see every raw detection the model produces.
+- **`scripts/record_demo.sh`** — one-shot demo runner for the
+  screen-recording session (sources `~/.venv-sys`, runs
+  `python -m guardian --max-frames 300`, dumps event summary).
+- **`RECORDING.md`** — preflight checklist + macOS screen-capture +
+  choreography table + troubleshooting for the demo.
+- **`draw_min_streak` config** — `LabelStreakTracker` overlay that
+  suppresses boxes that don't persist for N consecutive analyzed
+  frames. Detector still fires every frame (escalator + logs see
+  everything); only the visualization is smoothed.
+
+### Fixed
+
+- **MPS float64 shim path was rescaling boxes to the wrong frame size.**
+  `post_process_object_detection` was getting `pixel_values.shape[-2:]`
+  (the model's *internal* resized shape, e.g. 640×640) instead of the
+  original frame's `(H, W)`. Labels came out right, positions wrong.
+  Both code paths now use the original frame's `(H, W)` for
+  `target_sizes`. On a 1280×720 frame, boxes now correctly span the
+  full width instead of being clamped to 640 px.
+- **`conf_threshold` default 0.4 was too aggressive for real-webcam
+  people** — raised then settled at 0.45 (still above the 0.04 noise
+  floor but catches real people in normal indoor lighting).
+- **`debug_detect.py --conf 0` short-circuited** the override. Renamed
+  to `--show-all` and made it explicitly set conf to 0.001.
+- **`--list-cameras` was passing `sys.argv[1:]` to the inner script**
+  which doesn't know guardian's flags; now it forwards only `--max-index`
+  / `--width` / `--height`.
+- **`pyproject.toml` `requires-python` capped at `<3.13`** — blocked
+  python.org 3.13.13 install. Bumped to `<3.14`.
+- **`Pillow` was only a transitive dep of transformers** — promoted to
+  a direct dep so RT-DETR's image processor imports cleanly.
+- **`scripts/smoke_*.py` failed when run as a script** because Python
+  added the script's directory (not the project root) to `sys.path[0]`.
+  Each script now prepends `Path(__file__).resolve().parents[1]`.
+
+### Verified
+
+- 17-frame M6 dry-test (real captured frames through M3, 0 false
+  positives, 0 parse errors)
+- RT-DETR on MPS at 14.76 fps (66 ms p50 / 74 ms p95)
+- Detective latency 1.65 s p50 / 3.43 s p95 over 17 calls
+- Ollama keyless path (9.6 s, parse-error safe default per §13 trap 13)
+- 15/15 unit tests pass
+
+[Unreleased]: https://github.com/DanielJD1216/webcam-guardian/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/DanielJD1216/webcam-guardian/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/DanielJD1216/webcam-guardian/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/DanielJD1216/webcam-guardian/releases/tag/v0.1.0
 
 Initial public release. Two-tier webcam guardian under MIT — local RT-DETR
 guard + bring-your-own OpenAI-compatible detective.
