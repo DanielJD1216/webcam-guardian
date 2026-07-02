@@ -46,17 +46,27 @@ def list_sysprofiler_cameras() -> list[str]:
     return names
 
 
-def probe_index(index: int, backend: int) -> tuple[bool, tuple[int, int] | None]:
+def probe_index(index: int, backend: int) -> tuple[bool, tuple[int, int] | None, tuple[int, int] | None]:
+    """Returns (opened, native_WH_or_None, frame_shape_or_None).
+
+    `native_WH` is what the camera reports BEFORE we set width/height — useful
+    for distinguishing a real USB cam (max 1280x720 or 640x480) from a
+    placeholder feed that always reports 1920x1080.
+    """
     cap = cv2.VideoCapture(index, backend)
     if not cap.isOpened():
-        return False, None
+        return False, None, None
+    native = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+              int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
     ok, frame = cap.read()
     if not ok or frame is None:
         cap.release()
-        return False, None
+        return True, native, None
     shape = (frame.shape[1], frame.shape[0])
     cap.release()
-    return True, shape
+    return True, native, shape
 
 
 def main() -> int:
@@ -82,15 +92,17 @@ def main() -> int:
         print()
 
     print(f"Probing indices 0..{args.max_index}:")
-    print(f"  {'idx':<5} {'opens':<6} {'frame':<12}  recommendation")
+    print(f"  {'idx':<5} {'opens':<6} {'native':<12} {'frame':<12}  recommendation")
     working: list[tuple[int, tuple[int, int]]] = []
     for i in range(args.max_index + 1):
-        cap = cv2.VideoCapture(i, backend)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
-        ok, shape = probe_index(i, backend)
-        rec = "USE THIS" if i == 0 else ("alt" if ok else "—")
-        print(f"  {i:<5} {ok!s:<6} {(f'{shape[0]}x{shape[1]}' if shape else 'n/a'):<12}  {rec}")
+        ok, native, shape = probe_index(i, backend)
+        rec = "USE THIS" if i == 0 else ("alt" if (ok and shape is not None) else "—")
+        native_str = (f"{native[0]}x{native[1]}" if native else "n/a")
+        shape_str = (f"{shape[0]}x{shape[1]}" if shape else "n/a")
+        marker = ""
+        if native and shape and native != shape:
+            marker = "  (placeholder? forced 1280x720 != native)"
+        print(f"  {i:<5} {ok!s:<6} {native_str:<12} {shape_str:<12}  {rec}{marker}")
         if ok and shape is not None:
             working.append((i, shape))
 
