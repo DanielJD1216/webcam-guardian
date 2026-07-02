@@ -34,8 +34,8 @@ class GuardCfg:
     backend: str = "rtdetr"  # rtdetr | yolo11n | locateanything
     device: str = "auto"  # auto | mps | cuda | cpu
     analyzed_fps: int = 5
-    conf_threshold: float = 0.55
-    draw_min_streak: int = 2  # require label present N consecutive analyzed frames before drawing
+    conf_threshold: float = 0.45
+    draw_min_streak: int = 1  # require label present N consecutive analyzed frames before drawing
     draw_classes: tuple[str, ...] = ("person", "dog", "car")
     trigger_classes: tuple[str, ...] = ("person", "car")
     coco_ids: Mapping[str, tuple[int, ...]] = field(
@@ -146,8 +146,8 @@ def _guard(raw: dict) -> GuardCfg:
         backend=str(raw.get("backend", "rtdetr")),
         device=str(raw.get("device", "auto")),
         analyzed_fps=int(raw.get("analyzed_fps", 5)),
-        conf_threshold=float(raw.get("conf_threshold", 0.55)),
-        draw_min_streak=int(raw.get("draw_min_streak", 2)),
+        conf_threshold=float(raw.get("conf_threshold", 0.45)),
+        draw_min_streak=int(raw.get("draw_min_streak", 1)),
         draw_classes=_tupleize(raw.get("draw_classes", ["person", "dog", "car"])),
         trigger_classes=_tupleize(raw.get("trigger_classes", ["person", "car"])),
         coco_ids=_mapping_keys_to_tuples(raw.get("coco_ids", {}) or {}),
