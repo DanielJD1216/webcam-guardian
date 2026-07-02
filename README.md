@@ -39,6 +39,23 @@ A live window opens. `q` quits.
 > opencode if used headless): **System Settings → Privacy & Security → Camera**.
 > The prompt triggers on the first capture attempt; denial silently yields no
 > frames.
+>
+> **macOS 26 TCC gotcha (real):** Homebrew's Python is `adhoc`-signed, which
+> Apple's TCC service silently refuses — no prompt, no entry in the Camera
+> list. If `python scripts/smoke_camera.py` errors with `not authorized` from
+> a brew Python venv, switch to a TCC-signed interpreter:
+>
+> - **Recommended:** install [python.org Python](https://www.python.org/downloads/macos/)
+>   (signed by PSF; lands at `/Library/Frameworks/Python.framework/Versions/3.13/bin/python3`).
+>   Rebuild the venv with it:
+>   ```bash
+>   rm -rf .venv
+>   /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 -m venv .venv
+>   source .venv/bin/activate
+>   pip install -e .
+>   ```
+> - **Workaround without re-installing:** keep a separate Apple-Python venv for
+>   the camera-bound steps (see BUILD-PLAN §13 trap 7).
 
 ## Provider table
 
