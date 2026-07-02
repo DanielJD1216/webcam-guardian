@@ -1,5 +1,9 @@
 # Webcam Guardian
 
+<p align="center">
+  <img src="docs/banner.png" alt="webcam-guardian — local RT-DETR guard + bring-your-own detective" width="900">
+</p>
+
 A local-first webcam "guardian" with two tiers. A cheap, always-on local vision
 model (the **guard**) watches your webcam for free and draws live boxes on a
 preview window. A frontier multimodal model of your choice (the **detective**)
