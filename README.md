@@ -319,3 +319,7 @@ analysis.
 - [`CHANGELOG.md`](CHANGELOG.md) — release history; follows Keep-a-Changelog.
 - [`SECURITY.md`](SECURITY.md) — disclosure path + threat model +
   pre-publish hardening checklist.
+- [`ACKNOWLEDGMENTS.md`](ACKNOWLEDGMENTS.md) — **AI authorship
+  disclosure.** Initial build plan written by **Fable 5**; all code
+  written by **MiniMax-M3** via opencode; decisions, infra, and
+  credentials by the human maintainer.
