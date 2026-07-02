@@ -11,10 +11,63 @@ The detective is **bring-your-own**: any OpenAI-compatible vision endpoint works
 MiniMax M3 is one verified option. Ollama is first-class if you want zero frames
 leaving your machine.
 
+## How it works
+
+```mermaid
+flowchart LR
+    A[Webcam] -->|frames| B[Guard<br/>RT-DETR r18<br/>local · free]
+    B -->|boxes + HUD overlay| C[Live preview<br/>cv2.imshow]
+    B -->|present classes| D{Escalator<br/>debounce + cooldown + caps}
+    D -->|should call| E[Detective worker thread]
+    E -->|JPEG + tool call| F[OpenAI-compatible<br/>vision model<br/>MiniMax M3 · Ollama · …]
+    F -->|decision: alert? cat? msg?| E
+    E -->|alert: true| G[AlertChannel fan-out]
+    G --> H[Telegram]
+    G --> I[Resend email]
+    G --> J[Desktop]
+    G --> K[ntfy]
+    B -->|every 5 s| L[events.jsonl]
+    D --> L
+    E --> L
+    G --> L
 ```
-webcam ─▶ [guard: RT-DETR, local, free] ──debounce + cooldown + caps──▶ [detective: any OpenAI-compatible] ──alert=true──▶ Telegram + Email
-                  │ live boxes + HUD                                                                                    │
-                  └───────────────────────────────────────────── JSONL events.jsonl ─────────────────────────────────────┘
+
+### What happens when a person walks into frame
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Cam as Webcam
+    participant Main as Main loop
+    participant Esc as Escalator
+    participant DW as DetectiveWorker
+    participant API as MiniMax M3
+    participant Ch as Telegram + Resend
+
+    loop every 1/5 s (analyzed_fps)
+        Cam->>Main: latest frame
+        Main->>Main: guard.detect(frame)
+        Main->>Esc: observe({person})
+        Note over Esc: streak = 1 / debounce_frames
+    end
+    Main->>Esc: observe({person})
+    Note over Esc: streak = 2 / 3
+    Main->>Esc: observe({person})
+    Note over Esc: streak = 3 ✓ debounced
+    Esc-->>Main: should_call=True, labels=[person]
+    Main->>DW: queue.put(frame.copy, [person])
+    DW->>Esc: on_dispatch([person])  # cooldown starts NOW
+    DW->>API: tool_call(judge, frame)
+    API-->>DW: {alert: true, category: "delivery", message: "…"}
+    alt alert: true
+        DW->>DW: save snapshot to snapshots/alert_*.jpg
+        DW->>Ch: dispatch_alerts(title, body, snapshot)
+        Ch-->>DW: alert_sent
+        DW->>Esc: on_alert(now)  # hourly cap check
+    else alert: false
+        Note over DW: cooldown still charged — §13 trap 5
+    end
+    Main->>Main: log to events.jsonl
 ```
 
 ## Quickstart
@@ -264,3 +317,5 @@ analysis.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — dev setup, code style, traps to
   respect, PR conventions.
 - [`CHANGELOG.md`](CHANGELOG.md) — release history; follows Keep-a-Changelog.
+- [`SECURITY.md`](SECURITY.md) — disclosure path + threat model +
+  pre-publish hardening checklist.
