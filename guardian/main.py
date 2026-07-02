@@ -271,6 +271,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     cam_window: list[float] = []
     frames_seen = 0
     last_decision_summary = ""
+    cached_detections: list = []   # boxes held between analyzed frames so the
+                                  # overlay doesn't blink at camera fps (30)
     t_start = time.monotonic()
 
     try:
@@ -306,10 +308,10 @@ def main(argv: Optional[list[str]] = None) -> int:
                 last_analysis = now
                 if isinstance(guard, LocateAnythingGuard):
                     guard.submit_frame(frame)
-                detect_to_draw = detections
+                cached_detections = detections
             else:
-                detect_to_draw = []
                 analyzed_fps = sum(fps_window) / max(1, len(fps_window)) if fps_window else 0.0
+            detect_to_draw = cached_detections
 
             camera_fps = len(cam_window)
 

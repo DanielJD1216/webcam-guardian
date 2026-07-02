@@ -12,7 +12,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 USE_SYS_VENV="${USE_SYS_VENV:-1}"
-MAX_FRAMES="${MAX_FRAMES:-300}"   # ~60s @ 5 analyzed_fps
+MAX_FRAMES="${MAX_FRAMES:-3000}"   # ~100s @ 30fps camera fps; main loop iterates at camera rate
 EXTRA_ARGS="${EXTRA_ARGS:-}"
 
 if [[ "$USE_SYS_VENV" == "1" ]]; then
@@ -34,7 +34,7 @@ LOG="snapshots/demo_$(date +%Y%m%d_%H%M%S).log"
 
 echo "[demo] python: $(which python)  version: $(python -c 'import sys; print(sys.version.split()[0])')"
 echo "[demo] log: $LOG"
-echo "[demo] max-frames: $MAX_FRAMES  extra: $EXTRA_ARGS"
+echo "[demo] max-frames: $MAX_FRAMES  (~100s at ~30fps camera; main loop iterates per camera frame, not per analyzed tick)"
 echo
 echo "When the window opens:"
 echo "  1. Walk into frame (person)            → expect 1 detective call, 1 alert"
