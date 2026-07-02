@@ -44,10 +44,9 @@ alert:
   attach_snapshot: true         # telegram/email/ntfy attach the judged frame
   telegram_chat_id: ""          # message your bot once, then GET /getUpdates -> result[0].message.chat.id
   email:
-    smtp_host: smtp.gmail.com
-    smtp_port: 465              # SSL
-    from_addr: ""               # the Gmail account sending (may equal to_addr)
+    from_addr: ""               # Resend sender, e.g. "Webcam Guardian <alerts@yourdomain.com>"
     to_addr: ""                 # where alerts land
+    api_key_env: RESEND_API_KEY # name of the env var holding the Resend key
   ntfy_topic: ""                # optional channel only; long random string (topic IS the password)
 
 log:

@@ -1,23 +1,46 @@
 # secrets & personal config — never commit (BUILD-PLAN.md §13, trap 15)
 .env
+.env.*
+!.env.example
 config.yaml
+config.*.yaml
+!config.example.yaml
 
 # runtime artifacts (contain webcam frames / decisions)
 events.jsonl
+events.*.jsonl
 snapshots/
 *.log
 
 # python
 .venv*/
+venv/
+env/
 __pycache__/
 *.pyc
+*.pyo
 .pytest_cache/
 *.egg-info/
+.coverage
+.tox/
+dist/
+build/
 
 # model weights
 *.pt
 *.gguf
 *.onnx
+*.safetensors
 
-# macOS
+# benchmark and dry-test outputs (regenerable, contain real frames)
+dry_test_results.csv
+bench_results.json
+
+# editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# os
 .DS_Store
+Thumbs.db
