@@ -228,3 +228,12 @@ MIT — see [LICENSE](LICENSE). One optional extra to be aware of:
 See [`BUILD-PLAN.md`](BUILD-PLAN.md) — it documents the verified API facts, the
 local/cloud trade-offs, the threading contract, the trap list, and the cost
 analysis.
+
+## Other docs
+
+- [`RECORDING.md`](RECORDING.md) — how to record the live demo (the
+  deliverable the build plan was written to produce). Includes the
+  choreography and the troubleshooting table.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — dev setup, code style, traps to
+  respect, PR conventions.
+- [`CHANGELOG.md`](CHANGELOG.md) — release history; follows Keep-a-Changelog.
