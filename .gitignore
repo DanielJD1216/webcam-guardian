@@ -1,0 +1,23 @@
+# secrets & personal config — never commit (BUILD-PLAN.md §13, trap 15)
+.env
+config.yaml
+
+# runtime artifacts (contain webcam frames / decisions)
+events.jsonl
+snapshots/
+*.log
+
+# python
+.venv*/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# model weights
+*.pt
+*.gguf
+*.onnx
+
+# macOS
+.DS_Store

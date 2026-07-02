@@ -1,0 +1,56 @@
+# Webcam Guardian configuration template.
+# Copy to config.yaml and edit. config.yaml is gitignored — your real settings stay local.
+# Full reference: BUILD-PLAN.md §6.2
+
+camera:
+  index: 0
+  backend: auto            # auto | dshow | msmf | avfoundation | v4l2
+  width: 1280
+  height: 720
+
+guard:
+  backend: rtdetr          # rtdetr (default, Apache-2.0) | yolo11n (extra, AGPL) | locateanything (experimental)
+  device: auto             # auto → mps on Apple Silicon, cuda on NVIDIA, else cpu
+  analyzed_fps: 5          # target analysis rate (actual rate shown in HUD & logged)
+  conf_threshold: 0.4
+  draw_classes: [person, dog, car]
+  trigger_classes: [person, car]
+  coco_ids: {person: [0], car: [2, 5, 7], dog: [16]}   # bus/truck count as "car" (delivery vans!)
+  la_command: []           # experimental LocateAnything port launch command; empty = backend unavailable
+  la_input_long_side: 960
+
+escalation:
+  debounce_frames: 3       # class must persist N consecutive analyzed frames before escalating
+  cooldown_seconds: 45     # min seconds between detective CALLS per class (starts at dispatch)
+  max_detective_calls_per_run: 30
+  max_alerts_per_hour: 10
+
+detective:                 # ANY OpenAI-compatible endpoint — this block is the bring-your-own-model surface
+  base_url: https://api.minimax.io/v1   # e.g. api.openai.com/v1 · http://localhost:11434/v1 (Ollama) · openrouter.ai/api/v1
+  model: MiniMax-M3
+  api_key_env: MINIMAX_API_KEY          # name of the env var holding the key; "" for keyless local servers
+  extra_body: {thinking: {type: disabled}}   # provider-specific params, merged verbatim into the request
+  timeout_seconds: 30
+  max_completion_tokens: 500
+  temperature: 0.2         # low for consistent judgments
+  image_long_side: 1024
+  jpeg_quality: 80
+  image_detail: low        # low | default | high (OpenAI/MiniMax semantics; ignored harmlessly elsewhere)
+  use_tool_call: true      # forced tool call for strict JSON; set false for models with weak tool calling
+  scene_description: "a front door / home entry area"
+
+alert:
+  channels: [telegram, email]   # all listed channels fire on every alert; options: telegram | email | desktop | ntfy
+  attach_snapshot: true         # telegram/email/ntfy attach the judged frame
+  telegram_chat_id: ""          # message your bot once, then GET /getUpdates -> result[0].message.chat.id
+  email:
+    smtp_host: smtp.gmail.com
+    smtp_port: 465              # SSL
+    from_addr: ""               # the Gmail account sending (may equal to_addr)
+    to_addr: ""                 # where alerts land
+  ntfy_topic: ""                # optional channel only; long random string (topic IS the password)
+
+log:
+  events_path: events.jsonl
+  snapshots_dir: snapshots
+  save_escalation_frames: true
