@@ -11,6 +11,14 @@ MPS note: transformers >= 5.x calls `torch.arange(..., dtype=torch.float64, ...)
 inside RT-DETR's position-embedding path. PyTorch's MPS backend doesn't support
 float64. We bind the original torch.arange into the closure so a one-call
 monkey-patch (downgrading float64 → float32) doesn't recurse.
+
+Coordinate safety: `post_process_object_detection` rescales model outputs to
+the original image's pixel space. The rescales correctly only when
+`target_sizes` is the original frame's (H, W). Passing the model's
+*internal* tensor shape (pixel_values.shape[-2:]) yields boxes that max
+out around the resized grid instead of the original frame — labels right,
+positions wrong. We pin target_sizes to the original frame's (H, W) in
+both code paths.
 """
 
 from __future__ import annotations
@@ -58,20 +66,19 @@ class RTDetrGuard(GuardBackend):
     def _forward(self, inputs):
         with torch.no_grad():
             try:
-                return self.model(**inputs)
+                return ("normal", self.model(**inputs))
             except TypeError as e:
                 if "float64" in str(e) and self.device == "mps":
                     orig = torch.arange
                     torch.arange = _safe_arange
                     try:
-                        return self.model(**inputs)
+                        return ("mps_shim", self.model(**inputs))
                     finally:
                         torch.arange = orig
                 raise
 
-    def _post(self, inputs, outputs):
-        target_sizes = torch.tensor(
-            [inputs["pixel_values"].shape[-2:]], device=self.device)
+    def _post(self, outputs, target_hw):
+        target_sizes = torch.tensor([target_hw], device=self.device)
         return self.processor.post_process_object_detection(
             outputs, target_sizes=target_sizes,
             threshold=self.cfg.conf_threshold,
@@ -82,9 +89,10 @@ class RTDetrGuard(GuardBackend):
             return []
         rgb = frame_bgr[:, :, ::-1]
         pil_img = Image.fromarray(rgb)
+        h, w = frame_bgr.shape[:2]
         inputs = self.processor(images=pil_img, return_tensors="pt").to(self.device)
-        outputs = self._forward(inputs)
-        results = self._post(inputs, outputs)
+        _, outputs = self._forward(inputs)
+        results = self._post(outputs, (h, w))
 
         out: list[Detection] = []
         for score, label_id, box in zip(
