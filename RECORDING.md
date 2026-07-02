@@ -17,6 +17,9 @@ arriving Telegram/email → one escalation per delivery event thanks to the
       too if python.org Python was installed.
 - [ ] Ollama running (`ollama serve`) **only** if you intend to demo the
       privacy-first path. Otherwise: skip.
+- [ ] **Camera pinned**: if the OS keeps grabbing your iPhone via Continuity,
+      run `python -m guardian --list-cameras` and pass `--camera-index N` to
+      pin the one you want.
 
 ## 2. Screen recording
 

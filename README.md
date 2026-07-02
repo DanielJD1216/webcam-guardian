@@ -35,6 +35,33 @@ python -m guardian
 
 A live window opens. `q` quits.
 
+### Picking the camera
+
+macOS doesn't always pick the camera you'd expect (e.g. Continuity Camera
+from your iPhone can shadow the built-in FaceTime HD). Two ways to override:
+
+```bash
+# See what's available
+python -m guardian --list-cameras
+# or
+python scripts/list_cameras.py
+
+# Pin a specific one for this run
+python -m guardian --camera-index 0           # built-in FaceTime HD
+python -m guardian --camera-index 3           # iPhone via Continuity
+```
+
+Persist a choice by editing `config.yaml`:
+
+```yaml
+camera:
+  index: 0           # built-in
+  backend: auto      # or force a specific OS backend
+```
+
+`backend` options: `auto` (default, picks AVFOUNDATION/DSHOW/V4L2 by
+platform), `avfoundation` (macOS), `dshow` / `msmf` (Windows), `v4l2` (Linux).
+
 > **First run on macOS:** you must grant Camera access to your terminal (and to
 > opencode if used headless): **System Settings → Privacy & Security → Camera**.
 > The prompt triggers on the first capture attempt; denial silently yields no

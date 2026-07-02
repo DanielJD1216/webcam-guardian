@@ -141,6 +141,31 @@ class DetectiveWorker(threading.Thread):
                               "labels": labels})
 
 
+def _with_camera_override(cfg, *, index: int | None = None, backend: str | None = None):
+    """Return a new Config with camera.index / camera.backend overridden.
+
+    Config is a frozen dataclass, so we rebuild it. The CameraCfg is the only
+    one we touch here.
+    """
+    from .config import CameraCfg, Config
+    new_cam = CameraCfg(
+        index=cfg.camera.index if index is None else int(index),
+        backend=cfg.camera.backend if backend is None else str(backend),
+        width=cfg.camera.width, height=cfg.camera.height,
+    )
+    return Config(
+        camera=new_cam, guard=cfg.guard, escalation=cfg.escalation,
+        detective=cfg.detective, alert=cfg.alert, log=cfg.log, raw=cfg.raw,
+    )
+
+
+def _list_cameras_only() -> int:
+    """Delegate to scripts/list_cameras.py via subprocess so it parses its own argv."""
+    import subprocess
+    script = Path(__file__).resolve().parents[1] / "scripts" / "list_cameras.py"
+    return subprocess.call([sys.executable, str(script)] + sys.argv[1:])
+
+
 def _hud_record(hud: HudState, guard_name: str, analyzed_fps: float, camera_fps: float,
                 calls: int, cooldowns: dict[str, float], last: str) -> None:
     hud.guard_backend = guard_name
@@ -158,15 +183,30 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--env", default=".env")
     parser.add_argument("--max-frames", type=int, default=0,
                         help="exit after N frames (0 = until q). used for benchmarks.")
+    parser.add_argument("--camera-index", type=int, default=None,
+                        help="override camera.index from config.yaml")
+    parser.add_argument("--camera-backend", type=str, default=None,
+                        choices=["auto", "dshow", "msmf", "avfoundation", "v4l2"],
+                        help="override camera.backend from config.yaml")
+    parser.add_argument("--list-cameras", action="store_true",
+                        help="probe available cameras and exit")
     args = parser.parse_args(argv)
+
+    if args.list_cameras:
+        return _list_cameras_only()
 
     env_path = Path(args.env)
     if env_path.exists():
         load_dotenv(env_path)
 
     cfg = load(args.config)
+    if args.camera_index is not None:
+        cfg = _with_camera_override(cfg, index=args.camera_index)
+    if args.camera_backend:
+        cfg = _with_camera_override(cfg, backend=args.camera_backend)
     print(f"[boot] webcam-guardian v{__version__}")
     print(f"[boot] config={args.config} guard={cfg.guard.backend} detective={cfg.detective.model}")
+    print(f"[boot] camera index={cfg.camera.index} backend={cfg.camera.backend}")
 
     log = EventLog(cfg.log.events_path)
     log.log({"type": "startup", "version": __version__,
