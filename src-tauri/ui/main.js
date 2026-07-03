@@ -241,6 +241,49 @@ async function listSnapshotsDir() {
   }
 }
 
+// ---------- live preview websocket ----------
+
+let wsConn = null;
+let lastPreviewUrl = null;
+
+function connectPreview() {
+  if (wsConn && wsConn.readyState === WebSocket.OPEN) return;
+  try {
+    wsConn = new WebSocket("ws://127.0.0.1:9876");
+  } catch (e) {
+    return;
+  }
+  wsConn.binaryType = "arraybuffer";
+  wsConn.onopen = () => {
+    els.footerMsg.textContent = "live preview: connected";
+  };
+  wsConn.onmessage = (e) => {
+    const buf = e.data;
+    if (!(buf instanceof ArrayBuffer) || buf.byteLength < 8) return;
+    const bytes = new Uint8Array(buf);
+    const newlineIdx = bytes.indexOf(0x0a);
+    if (newlineIdx < 0) return;
+    const header = new TextDecoder().decode(bytes.slice(0, newlineIdx));
+    const m = header.match(/^(\d+)x(\d+)$/);
+    if (!m) return;
+    const jpegBytes = bytes.slice(newlineIdx + 1);
+    const blob = new Blob([jpegBytes], { type: "image/jpeg" });
+    const url = URL.createObjectURL(blob);
+    els.previewImg.src = url;
+    els.previewImg.style.display = "block";
+    if (lastPreviewUrl) URL.revokeObjectURL(lastPreviewUrl);
+    lastPreviewUrl = url;
+  };
+  wsConn.onclose = () => {
+    wsConn = null;
+    els.footerMsg.textContent = "live preview: disconnected (start guardian to connect)";
+    setTimeout(connectPreview, 2000);
+  };
+  wsConn.onerror = () => {
+    wsConn?.close();
+  };
+}
+
 // ---------- utilities ----------
 
 function escapeHtml(s) {
@@ -267,6 +310,7 @@ els.logFilters.addEventListener("click", (e) => {
   await rescanCameras();
   await refreshStatus();
   await refreshAlerts();
+  connectPreview();
 })();
 
 listen("guardian:started", (e) => {

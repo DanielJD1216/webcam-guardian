@@ -13,6 +13,8 @@ Per §13 trap 3: cv2.imshow/waitKey main thread only — detective calls NEVER o
 from __future__ import annotations
 
 import argparse
+import asyncio
+import base64
 import os
 import queue
 import sys
@@ -64,6 +66,80 @@ def _make_guard(cfg) -> GuardBackend:
     if name == "locateanything":
         return LocateAnythingGuard(cfg.guard)
     raise ValueError(f"unknown guard backend: {name}")
+
+
+class FrameBroadcaster:
+    """Latest-frame holder + asyncio WS server.
+
+    The main loop calls `push(jpeg_bytes, w, h)` after every draw. The WS server
+    broadcasts to all connected clients at whatever rate they request.
+    """
+
+    def __init__(self, port: int = 9876) -> None:
+        self.port = port
+        self._latest: tuple[bytes, int, int] | None = None
+        self._lock = threading.Lock()
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._clients: set = set()
+        self._thread: threading.Thread | None = None
+        self._stopped = threading.Event()
+
+    def push(self, jpeg: bytes, w: int, h: int) -> None:
+        with self._lock:
+            self._latest = (jpeg, w, h)
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, daemon=True, name="ws-broadcaster")
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stopped.set()
+        if self._loop is not None:
+            try:
+                self._loop.call_soon_threadsafe(self._loop.stop)
+            except Exception:
+                pass
+
+    def _run(self) -> None:
+        try:
+            asyncio.run(self._serve())
+        except Exception as e:
+            print(f"[ws] server stopped: {e}", file=sys.stderr)
+
+    async def _serve(self) -> None:
+        self._loop = asyncio.get_running_loop()
+        from websockets.asyncio.server import serve
+        async def handler(conn):
+            self._clients.add(conn)
+            try:
+                async for _ in conn:
+                    pass
+            finally:
+                self._clients.discard(conn)
+        async def periodic():
+            while not self._stopped.is_set():
+                await asyncio.sleep(0.1)
+                frame = None
+                with self._lock:
+                    frame = self._latest
+                if not frame or not self._clients:
+                    continue
+                payload = f"{frame[1]}x{frame[2]}\n".encode() + frame[0]
+                dead = []
+                for c in list(self._clients):
+                    try:
+                        await c.send(payload)
+                    except Exception:
+                        dead.append(c)
+                for d in dead:
+                    self._clients.discard(d)
+        server = await serve(handler, "127.0.0.1", self.port)
+        print(f"[ws] frame broadcaster listening on ws://127.0.0.1:{self.port}", flush=True)
+        try:
+            await asyncio.gather(server.wait_closed(), periodic())
+        except asyncio.CancelledError:
+            pass
+        server.close()
 
 
 class DetectiveWorker(threading.Thread):
@@ -208,6 +284,10 @@ def main(argv: Optional[list[str]] = None) -> int:
                         help="override camera.backend from config.yaml")
     parser.add_argument("--list-cameras", action="store_true",
                         help="probe available cameras and exit")
+    parser.add_argument("--no-imshow", action="store_true",
+                        help="skip cv2.imshow (use when embedded in Tauri)")
+    parser.add_argument("--ws-port", type=int, default=9876,
+                        help="WebSocket port for live preview frame stream (Tauri)")
     args = parser.parse_args(argv)
 
     if args.list_cameras:
@@ -224,7 +304,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         cfg = _with_camera_override(cfg, backend=args.camera_backend)
     print(f"[boot] webcam-guardian v{__version__}")
     print(f"[boot] config={args.config} guard={cfg.guard.backend} detective={cfg.detective.model}")
-    print(f"[boot] camera index={cfg.camera.index} backend={cfg.camera.backend}")
+    print(f"[boot] camera index={cfg.camera.index} backend={cfg.camera.backend} "
+          f"imshow={not args.no_imshow} ws_port={args.ws_port}")
 
     log = EventLog(cfg.log.events_path)
     log.log({"type": "startup", "version": __version__,
@@ -261,6 +342,9 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     worker = DetectiveWorker(detective, escalator, channels, log, cfg, frame_provider=None)
     worker.start()
+
+    broadcaster = FrameBroadcaster(port=args.ws_port)
+    broadcaster.start()
 
     hud = HudState()
     streak = LabelStreakTracker()
@@ -342,15 +426,23 @@ def main(argv: Optional[list[str]] = None) -> int:
                         last_decision_summary)
             draw_overlay(frame, detect_to_draw, cfg.guard.draw_classes, hud,
                          streak, min_streak=cfg.guard.draw_min_streak)
-            cv2.imshow("Webcam Guardian", frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
+            if not args.no_imshow:
+                cv2.imshow("Webcam Guardian", frame)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
+            else:
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
+                ok_jpg, jpg = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+                if ok_jpg:
+                    broadcaster.push(jpg.tobytes(), frame.shape[1], frame.shape[0])
 
             if args.max_frames and frames_seen >= args.max_frames:
                 break
     finally:
         worker.stop()
         worker.join(timeout=3)
+        broadcaster.stop()
         guard.close()
         cam.release()
         cv2.destroyAllWindows()

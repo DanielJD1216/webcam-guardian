@@ -129,6 +129,8 @@ async fn start(app: AppHandle, state: State<'_, GuardianState>) -> Result<u32, S
     let (python, project_root) = find_python_and_root();
     let mut cmd = Command::new(&python);
     cmd.arg("-m").arg("guardian")
+        .arg("--no-imshow")
+        .arg("--ws-port").arg("9876")
         .current_dir(&project_root)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
