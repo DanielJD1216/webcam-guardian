@@ -194,12 +194,21 @@ class DetectiveWorker(threading.Thread):
                     snap = None
                     if self.cfg.alert.attach_snapshot:
                         snap = snapshot_save(frame, self.cfg.log.snapshots_dir,
-                                              f"alert_{int(time.time())}.jpg")
-                    title = "Webcam Guardian alert"
-                    body = decision.get("message") or decision.get("reason", "")
-                    dispatch_alerts(self.channels, title, body, str(snap) if snap else None, self.log)
+                                              f"alert_{int(time.time()*1000):013d}.jpg")
+                    alert_id = f"alert_{int(time.time()*1000):013d}"
+                    category = decision.get("category", "alert")
+                    title = f"Webcam Guardian · {category}"
+                    message = (decision.get("message") or "").strip()
+                    reason = (decision.get("reason") or "").strip()
+                    body = message or reason or f"{category} detected"
+                    dispatch_alerts(self.channels, alert_id, title, body,
+                                    str(snap) if snap else None, self.log)
                     self.log.log({"type": "alert_dispatched",
-                                  "decision": decision})
+                                  "alert_id": alert_id,
+                                  "category": category,
+                                  "decision": decision,
+                                  "snapshot": str(snap) if snap else None,
+                                  "channels": [getattr(ch, "name", "?") for ch in self.channels]})
                 self.log.log({
                     "type": "detective_result",
                     "labels": labels,
