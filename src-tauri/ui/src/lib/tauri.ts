@@ -28,6 +28,7 @@ export const tauri = {
   stop: () => invoke<void>("stop"),
   readConfig: () => invoke<string>("read_config"),
   writeConfig: (contents: string) => invoke<void>("write_config", { contents }),
+  resetConfigFromExample: () => invoke<string>("reset_config_from_example"),
   clearLog: () => invoke<void>("clear_log"),
   listCameras: () => invoke<CameraOption[]>("list_cameras"),
   listAlerts: () => invoke<AlertItem[]>("list_alerts"),

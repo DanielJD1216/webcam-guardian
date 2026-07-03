@@ -172,6 +172,10 @@ export default function App() {
 
   const saveConfig = async () => {
     try {
+      if (!configDraft.trim()) {
+        setFooterMsg("refusing to save empty config — click Reset to restore defaults");
+        return;
+      }
       await tauri.writeConfig(configDraft);
       setCurrentConfig(configDraft);
       const idx = getConfigCameraIndex(configDraft);
@@ -179,6 +183,23 @@ export default function App() {
       setFooterMsg(`config saved · ${configDraft.length} chars`);
     } catch (e) {
       setFooterMsg(`write_config: ${e}`);
+    }
+  };
+
+  const resetConfig = async () => {
+    const ok = window.confirm("Reset config.yaml to defaults from config.example.yaml? Your current config will be overwritten.");
+    if (!ok) return;
+    try {
+      const fresh = await tauri.resetConfigFromExample();
+      setCurrentConfig(fresh);
+      setConfigDraft(fresh);
+      const idx = getConfigCameraIndex(fresh);
+      if (idx != null) setCameraIdx(idx);
+      const r = parseConfigResolution(fresh);
+      if (r) setResolution(r);
+      setFooterMsg(`config reset from example · ${fresh.length} chars`);
+    } catch (e) {
+      setFooterMsg(`reset_config: ${e}`);
     }
   };
 
@@ -408,6 +429,9 @@ export default function App() {
                 className="min-h-[100px] flex-1 resize-y rounded-md border border-line bg-bg/60 p-2 font-mono text-xs leading-relaxed text-text outline-none focus:border-yellow/40"
               />
               <div className="mt-2 flex justify-end gap-2">
+                <MovingBorder onClick={resetConfig} variant="secondary" className="!px-3 !py-1 text-xs">
+                  Reset
+                </MovingBorder>
                 <MovingBorder onClick={reloadConfig} variant="secondary" className="!px-3 !py-1 text-xs">
                   Reload
                 </MovingBorder>

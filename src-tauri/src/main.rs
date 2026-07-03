@@ -128,6 +128,9 @@ async fn read_config() -> Result<String, String> {
 #[tauri::command]
 async fn write_config(contents: String) -> Result<(), String> {
     let (config_path, _) = app_paths();
+    if contents.trim().is_empty() {
+        return Err("refusing to write empty config — it would zero config.yaml. Restore from example first.".into());
+    }
     tokio::fs::write(&config_path, contents)
         .await
         .map_err(|e| format!("write {}: {}", config_path.display(), e))
@@ -311,6 +314,23 @@ async fn list_alerts() -> Result<Vec<AlertItem>, String> {
     Ok(out)
 }
 
+#[tauri::command]
+async fn reset_config_from_example() -> Result<String, String> {
+    let root = project_root();
+    let example = root.join("config.example.yaml");
+    let target = root.join("config.yaml");
+    let contents = tokio::fs::read_to_string(&example)
+        .await
+        .map_err(|e| format!("read {}: {}", example.display(), e))?;
+    if contents.trim().is_empty() {
+        return Err("config.example.yaml is empty".into());
+    }
+    tokio::fs::write(&target, &contents)
+        .await
+        .map_err(|e| format!("write {}: {}", target.display(), e))?;
+    Ok(contents)
+}
+
 fn parse_pair(s: Option<&str>) -> Option<(i64, i64)> {
     let s = s?;
     let mut it = s.split('x');
@@ -367,7 +387,7 @@ async fn main() {
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             status, start, stop, read_config, write_config,
-            clear_log, list_cameras, list_alerts
+            clear_log, list_cameras, list_alerts, reset_config_from_example
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
