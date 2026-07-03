@@ -8,7 +8,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
-use tokio::time::{sleep, Duration};
+use tokio::time::Duration;
 
 #[derive(Default)]
 struct GuardianState {
@@ -406,7 +406,6 @@ async fn tail_events(app: AppHandle, events_path: PathBuf, state: Arc<GuardianSt
 #[tokio::main]
 async fn main() {
     let state = GuardianState::default();
-    let (_, _) = app_paths();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -432,8 +431,4 @@ async fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-    let _ = config_path_unused();
-    sleep(Duration::from_millis(1)).await;
 }
-
-fn config_path_unused() -> std::path::PathBuf { PathBuf::new() }
