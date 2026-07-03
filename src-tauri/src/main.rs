@@ -1,9 +1,3 @@
-// webcam-guardian Tauri shell
-//
-// Spawns the existing Python guardian as a child process; reads
-// events.jsonl and config.yaml via filesystem watchers; exposes commands
-// to the UI for start/stop/settings/log.
-
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -32,18 +26,68 @@ struct LogLine {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+struct CameraOption {
+    index: i64,
+    opens: bool,
+    native: Option<(i64, i64)>,
+    frame: Option<(i64, i64)>,
+    placeholder: bool,
+    label: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct Status {
     running: bool,
     pid: Option<u32>,
+    project_root: PathBuf,
     config_path: PathBuf,
     events_path: PathBuf,
     log_lines: Vec<LogLine>,
 }
 
-fn app_paths() -> (PathBuf, PathBuf) {
+fn find_python_and_root() -> (PathBuf, PathBuf) {
     let cwd = std::env::current_dir().unwrap_or(PathBuf::from("."));
-    let config = cwd.join("config.yaml");
-    let events = cwd.join("events.jsonl");
+    let candidates_at = |base: &PathBuf| -> Vec<PathBuf> {
+        vec![
+            base.join(".venv/bin/python"),
+            base.join(".venv/bin/python3"),
+            base.join(".venv-sys/bin/python"),
+            base.join(".venv-sys/bin/python3"),
+        ]
+    };
+    let mut base = cwd.clone();
+    for _ in 0..5 {
+        for c in candidates_at(&base) {
+            if c.exists() { return (c, base); }
+        }
+        match base.parent() {
+            Some(p) => base = p.to_path_buf(),
+            None => break,
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let mut base = exe.parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
+        for _ in 0..5 {
+            for c in candidates_at(&base) {
+                if c.exists() { return (c, base); }
+            }
+            match base.parent() {
+                Some(p) => base = p.to_path_buf(),
+                None => break,
+            }
+        }
+    }
+    (PathBuf::from("python3"), cwd)
+}
+
+fn project_root() -> PathBuf {
+    find_python_and_root().1
+}
+
+fn app_paths() -> (PathBuf, PathBuf) {
+    let root = project_root();
+    let config = root.join("config.yaml");
+    let events = root.join("events.jsonl");
     (config, events)
 }
 
@@ -56,11 +100,11 @@ async fn status(state: State<'_, GuardianState>) -> Result<Status, String> {
         guard.as_ref().and_then(|c| c.id())
     };
     let log_lines = state.log_tail.lock().await.clone();
-    Ok(Status { running, pid, config_path, events_path, log_lines })
+    Ok(Status { running, pid, project_root: project_root(), config_path, events_path, log_lines })
 }
 
 #[tauri::command]
-async fn read_config(state: State<'_, GuardianState>) -> Result<String, String> {
+async fn read_config() -> Result<String, String> {
     let (config_path, _) = app_paths();
     tokio::fs::read_to_string(&config_path)
         .await
@@ -68,7 +112,7 @@ async fn read_config(state: State<'_, GuardianState>) -> Result<String, String> 
 }
 
 #[tauri::command]
-async fn write_config(contents: String, state: State<'_, GuardianState>) -> Result<(), String> {
+async fn write_config(contents: String) -> Result<(), String> {
     let (config_path, _) = app_paths();
     tokio::fs::write(&config_path, contents)
         .await
@@ -78,26 +122,18 @@ async fn write_config(contents: String, state: State<'_, GuardianState>) -> Resu
 #[tauri::command]
 async fn start(app: AppHandle, state: State<'_, GuardianState>) -> Result<u32, String> {
     {
-        let mut running = state.running.lock().await;
+        let running = state.running.lock().await;
         if *running { return Err("already running".into()); }
     }
 
-    let venv_python = std::env::current_dir()
-        .unwrap_or(PathBuf::from("."))
-        .join(".venv")
-        .join("bin")
-        .join("python");
-    let python = if venv_python.exists() { venv_python } else {
-        std::env::current_dir().unwrap_or(PathBuf::from("."))
-            .join(".venv-sys").join("bin").join("python3")
-    };
-
+    let (python, project_root) = find_python_and_root();
     let mut cmd = Command::new(&python);
     cmd.arg("-m").arg("guardian")
+        .current_dir(&project_root)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let mut child = cmd.spawn().map_err(|e| format!("spawn python: {}", e))?;
+    let mut child = cmd.spawn().map_err(|e| format!("spawn {:?}: {}", python, e))?;
     let pid = child.id().unwrap_or(0);
 
     let mut guard = state.child.lock().await;
@@ -126,6 +162,52 @@ async fn stop(app: AppHandle, state: State<'_, GuardianState>) -> Result<(), Str
 async fn clear_log(state: State<'_, GuardianState>) -> Result<(), String> {
     state.log_tail.lock().await.clear();
     Ok(())
+}
+
+#[tauri::command]
+async fn list_cameras() -> Result<Vec<CameraOption>, String> {
+    let (python, project_root) = find_python_and_root();
+    let output = Command::new(&python)
+        .arg("-m").arg("guardian")
+        .arg("--list-cameras")
+        .current_dir(&project_root)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| format!("spawn {:?}: {}", python, e))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let mut cams = Vec::new();
+    let mut in_table = false;
+    for line in stdout.lines() {
+        if line.contains("Probing indices") {
+            in_table = true; continue;
+        }
+        if !in_table { continue; }
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 4 { continue; }
+        let idx: i64 = match parts[0].parse() { Ok(n) => n, Err(_) => continue };
+        let opens = parts[1] == "True";
+        let native = parse_pair(parts.get(2).copied());
+        let frame = parse_pair(parts.get(3).copied());
+        let placeholder = line.contains("placeholder");
+        cams.push(CameraOption {
+            index: idx, opens, native, frame, placeholder,
+            label: format!("Camera {} ({}x{})",
+                idx,
+                frame.map(|(w, _)| w).unwrap_or(0),
+                frame.map(|(_, h)| h).unwrap_or(0)),
+        });
+    }
+    Ok(cams)
+}
+
+fn parse_pair(s: Option<&str>) -> Option<(i64, i64)> {
+    let s = s?;
+    let mut it = s.split('x');
+    let w = it.next()?.parse().ok()?;
+    let h = it.next()?.parse().ok()?;
+    Some((w, h))
 }
 
 fn parse_event_line(line: &str) -> Option<LogLine> {
@@ -167,18 +249,19 @@ async fn tail_events(app: AppHandle, events_path: PathBuf, state: Arc<GuardianSt
             .filter_map(parse_event_line)
             .collect();
         if new_lines.is_empty() { continue; }
-        let mut log = state.log_tail.lock().await;
-        *log = new_lines;
-        drop(log);
-        app.emit("guardian:events", &*state.log_tail.lock().await).ok();
+        {
+            let mut log = state.log_tail.lock().await;
+            *log = new_lines;
+        }
+        let snapshot = state.log_tail.lock().await.clone();
+        app.emit("guardian:events", &snapshot).ok();
     }
 }
 
 #[tokio::main]
 async fn main() {
     let state = GuardianState::default();
-    let (config_path, events_path) = app_paths();
-    *state.events_path.lock().await = events_path.clone();
+    let (_, _) = app_paths();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -186,7 +269,8 @@ async fn main() {
         .plugin(tauri_plugin_fs::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
-            status, start, stop, read_config, write_config, clear_log
+            status, start, stop, read_config, write_config,
+            clear_log, list_cameras
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -197,15 +281,14 @@ async fn main() {
                 log_tail: state_handle.log_tail.clone(),
                 running: state_handle.running.clone(),
             };
-            let events_path = std::path::Path::new(".")
-                .join("events.jsonl")
-                .canonicalize()
-                .unwrap_or_else(|_| std::path::PathBuf::from("./events.jsonl"));
+            let events_path = project_root().join("events.jsonl");
             tokio::spawn(tail_events(handle.clone(), events_path, Arc::new(arc_state)));
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-    let _ = config_path;
+    let _ = config_path_unused();
     sleep(Duration::from_millis(1)).await;
 }
+
+fn config_path_unused() -> std::path::PathBuf { PathBuf::new() }
