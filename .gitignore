@@ -44,3 +44,14 @@ bench_results.json
 # os
 .DS_Store
 Thumbs.db
+
+# tauri / rust
+src-tauri/target/
+src-tauri/gen/
+src-tauri/Cargo.lock
+src-tauri/.cargo/
+*.dmg
+*.app
+*.msi
+*.deb
+*.AppImage
