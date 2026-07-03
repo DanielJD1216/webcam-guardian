@@ -1,92 +1,12 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Webcam Guardian</title>
-  <link rel="stylesheet" href="styles.css" />
-</head>
-<body>
-  <header class="topbar">
-    <div class="brand">
-      <span class="logo"></span>
-      <h1>webcam-guardian</h1>
-    </div>
-
-    <div class="camera-picker">
-      <label for="camera-select">Camera</label>
-      <select id="camera-select" disabled>
-        <option>(scanning…)</option>
-      </select>
-      <button id="btn-rescan-cameras" class="secondary" title="Rescan cameras">↻</button>
-    </div>
-
-    <div class="controls">
-      <button id="btn-start" class="primary">Start guardian</button>
-      <button id="btn-stop" class="secondary" disabled>Stop</button>
-      <span id="status-pill" class="pill pill-stopped">stopped</span>
-    </div>
-  </header>
-
-  <main>
-    <section class="preview">
-      <div class="preview-frame">
-        <img id="preview-img" alt="live preview" src="" />
-        <div id="preview-empty" class="preview-empty">
-          <p>Start the guardian to see the live preview.</p>
-          <p class="hint">Live boxes and HUD are drawn by the Python core.</p>
-        </div>
-      </div>
-      <div class="metrics">
-        <span id="metric-pid">pid: —</span>
-        <span id="metric-config">config: config.yaml</span>
-      </div>
-    </section>
-
-    <aside class="sidebar">
-      <details open class="panel">
-        <summary>Config (config.yaml)</summary>
-        <textarea id="config-editor" spellcheck="false"></textarea>
-        <div class="panel-actions">
-          <button id="btn-reload-config" class="secondary">Reload</button>
-          <button id="btn-save-config" class="primary">Save</button>
-        </div>
-      </details>
-
-      <details open class="panel">
-        <summary>Live log (events.jsonl)</summary>
-        <div class="log-filters" id="log-filters">
-          <span class="filter-chip active" data-filter="all">all</span>
-          <span class="filter-chip" data-filter="startup">startup</span>
-          <span class="filter-chip" data-filter="guard_stats">guard_stats</span>
-          <span class="filter-chip" data-filter="escalation_dispatched">escalation</span>
-          <span class="filter-chip" data-filter="detective_result">detective</span>
-          <span class="filter-chip" data-filter="alert_sent">alert</span>
-          <span class="filter-chip" data-filter="alert_error">alert_err</span>
-        </div>
-        <div id="log-view" class="log-view"></div>
-        <div class="panel-actions">
-          <button id="btn-clear-log" class="secondary">Clear</button>
-        </div>
-      </details>
-
-      <details open class="panel">
-        <summary>Alert replay (snapshots/alert_*.jpg)</summary>
-        <div id="alert-gallery" class="alert-gallery">
-          <p class="muted">No alerts captured yet.</p>
-        </div>
-        <div class="panel-actions">
-          <button id="btn-refresh-alerts" class="secondary">Refresh</button>
-        </div>
-      </details>
-    </aside>
-  </main>
-
-  <footer class="statusbar">
-    <span>MIT · v0.2.0 · Python core + Tauri shell</span>
-    <span id="footer-msg">ready</span>
-  </footer>
-
-  <script type="module" src="main.js"></script>
-</body>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Webcam Guardian</title>
+  </head>
+  <body class="bg-bg text-text font-sans antialiased overflow-hidden">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>

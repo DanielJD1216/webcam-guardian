@@ -50,6 +50,9 @@ src-tauri/target/
 src-tauri/gen/
 src-tauri/Cargo.lock
 src-tauri/.cargo/
+src-tauri/dist/
+src-tauri/ui/node_modules/
+src-tauri/ui/dist/
 *.dmg
 *.app
 *.msi
