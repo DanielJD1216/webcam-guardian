@@ -151,6 +151,11 @@ export default function App() {
   const reloadConfig = async () => {
     try {
       const c = await tauri.readConfig();
+      if (!c || c.length === 0) {
+        setFooterMsg("config empty — config.yaml missing or unreadable");
+        console.warn("readConfig returned empty");
+        return;
+      }
       setCurrentConfig(c);
       setConfigDraft(c);
       const idx = getConfigCameraIndex(c);
@@ -158,8 +163,10 @@ export default function App() {
       const r = parseConfigResolution(c);
       if (r) setResolution(r);
       setFooterMsg(`config reloaded · ${c.length} chars`);
+      console.log("config reloaded", c.length, "chars; camera=", idx, "res=", r);
     } catch (e) {
       setFooterMsg(`read_config: ${e}`);
+      console.error("read_config failed", e);
     }
   };
 
@@ -221,19 +228,15 @@ export default function App() {
   // ----- alerts gallery -----
   const refreshAlerts = async () => {
     try {
-      const s = await tauri.status();
-      const dir = s.events_path.replace(/[^/]+$/, "snapshots");
-      const entries = await tauri.readDir(dir).catch(() => []);
-      const jpgs = (entries || [])
-        .filter((e: any) => e?.name?.startsWith?.("alert_") && e.name.endsWith(".jpg"))
-        .map((e: any) => ({
-          name: e.name as string,
-          url: tauri.assetUrl(`${dir}/${e.name}`),
-        }))
-        .sort((a, b) => b.name.localeCompare(a.name))
-        .slice(0, 24);
-      setAlertImgs(jpgs);
-    } catch { /* silent */ }
+      const items = await tauri.listAlerts();
+      const imgs = items.map((a) => ({
+        name: a.name,
+        url: tauri.assetUrl(a.path),
+      }));
+      setAlertImgs(imgs);
+    } catch (e) {
+      console.error("listAlerts failed", e);
+    }
   };
   useEffect(() => { refreshAlerts(); }, [logLines]);
   useEffect(() => { const i = setInterval(refreshAlerts, 5000); return () => clearInterval(i); }, []);

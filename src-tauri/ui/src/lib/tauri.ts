@@ -16,8 +16,11 @@ export type Status = {
   project_root: string;
   config_path: string;
   events_path: string;
+  snapshots_dir: string;
   log_lines: LogLine[];
 };
+
+export type AlertItem = { name: string; path: string };
 
 export const tauri = {
   status: () => invoke<Status>("status"),
@@ -27,7 +30,7 @@ export const tauri = {
   writeConfig: (contents: string) => invoke<void>("write_config", { contents }),
   clearLog: () => invoke<void>("clear_log"),
   listCameras: () => invoke<CameraOption[]>("list_cameras"),
-  readDir: (path: string) => invoke<any[]>("read_dir", { path }),
+  listAlerts: () => invoke<AlertItem[]>("list_alerts"),
   assetUrl: (path: string) => convertFileSrc(path),
   onStarted: (cb: (pid: number) => void) => listen<number>("guardian:started", (e) => cb(e.payload)),
   onStopped: (cb: () => void) => listen<void>("guardian:stopped", () => cb()),

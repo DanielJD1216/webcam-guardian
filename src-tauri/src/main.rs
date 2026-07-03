@@ -3,7 +3,6 @@ use std::process::Stdio;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use notify::{Event, EventKind, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -37,12 +36,19 @@ struct CameraOption {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+struct AlertItem {
+    name: String,
+    path: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct Status {
     running: bool,
     pid: Option<u32>,
     project_root: PathBuf,
     config_path: PathBuf,
     events_path: PathBuf,
+    snapshots_dir: PathBuf,
     log_lines: Vec<LogLine>,
 }
 
@@ -94,14 +100,21 @@ fn app_paths() -> (PathBuf, PathBuf) {
 
 #[tauri::command]
 async fn status(state: State<'_, GuardianState>) -> Result<Status, String> {
-    let (config_path, events_path) = app_paths();
+    let root = project_root();
+    let config_path = root.join("config.yaml");
+    let events_path = root.join("events.jsonl");
+    let snapshots_dir = root.join("snapshots");
     let running = *state.running.lock().await;
     let pid = {
         let guard = state.child.lock().await;
         guard.as_ref().and_then(|c| c.id())
     };
-    let log_lines = state.log_tail.lock().await.clone();
-    Ok(Status { running, pid, project_root: project_root(), config_path, events_path, log_lines })
+    let log_lines = match tokio::fs::read_to_string(&events_path).await {
+        Ok(s) => s.lines().filter_map(parse_event_line).collect(),
+        Err(_) => Vec::new(),
+    };
+    let _ = state;  // explicit "we used it" for clarity
+    Ok(Status { running, pid, project_root: root, config_path, events_path, snapshots_dir, log_lines })
 }
 
 #[tauri::command]
@@ -275,6 +288,29 @@ async fn list_cameras() -> Result<Vec<CameraOption>, String> {
     Ok(cams)
 }
 
+#[tauri::command]
+async fn list_alerts() -> Result<Vec<AlertItem>, String> {
+    let root = project_root();
+    let dir = root.join("snapshots");
+    let mut entries = match tokio::fs::read_dir(&dir).await {
+        Ok(e) => e,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let mut out = Vec::new();
+    while let Some(entry) = entries.next_entry().await.unwrap_or(None) {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with("alert_") && name.ends_with(".jpg") {
+            out.push(AlertItem {
+                name: name.clone(),
+                path: entry.path().to_string_lossy().to_string(),
+            });
+        }
+    }
+    out.sort_by(|a, b| b.name.cmp(&a.name));
+    out.truncate(24);
+    Ok(out)
+}
+
 fn parse_pair(s: Option<&str>) -> Option<(i64, i64)> {
     let s = s?;
     let mut it = s.split('x');
@@ -294,29 +330,17 @@ fn parse_event_line(line: &str) -> Option<LogLine> {
 }
 
 async fn tail_events(app: AppHandle, events_path: PathBuf, state: Arc<GuardianState>) {
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
-    let watcher_path = events_path.clone();
-    let _ = std::fs::File::create(&watcher_path).ok();
-    tokio::task::spawn_blocking(move || {
-        let mut watcher = match notify::recommended_watcher(move |res: notify::Result<Event>| {
-            if let Ok(ev) = res {
-                if matches!(ev.kind, EventKind::Modify(_) | EventKind::Create(_)) {
-                    let _ = tx.send(());
-                }
-            }
-        }) {
-            Ok(w) => w,
-            Err(_) => return,
-        };
-        let _ = watcher.watch(&watcher_path, RecursiveMode::NonRecursive);
-        loop { std::thread::park_timeout(Duration::from_secs(60)); }
-    });
-
-    while rx.recv().await.is_some() {
+    let _ = std::fs::File::create(&events_path).ok();
+    let mut last_line_count: usize = 0;
+    loop {
+        tokio::time::sleep(Duration::from_millis(800)).await;
         let contents = match tokio::fs::read_to_string(&events_path).await {
             Ok(s) => s,
             Err(_) => continue,
         };
+        let lines: Vec<&str> = contents.lines().collect();
+        if lines.len() == last_line_count { continue; }
+        last_line_count = lines.len();
         let new_lines: Vec<LogLine> = contents
             .lines()
             .filter_map(parse_event_line)
@@ -343,7 +367,7 @@ async fn main() {
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             status, start, stop, read_config, write_config,
-            clear_log, list_cameras
+            clear_log, list_cameras, list_alerts
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
