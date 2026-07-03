@@ -98,6 +98,28 @@ fn app_paths() -> (PathBuf, PathBuf) {
     (config, events)
 }
 
+async fn kill_stale_guardians() {
+    let pattern = "python -m guardian";
+    let my_pid = std::process::id() as i32;
+    let Ok(out) = tokio::process::Command::new("pgrep")
+        .args(&["-f", pattern])
+        .output().await else { return };
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let mut killed = 0;
+    for line in stdout.lines() {
+        let Ok(pid) = line.trim().parse::<i32>() else { continue };
+        if pid == my_pid { continue; }
+        let _ = tokio::process::Command::new("kill")
+            .args(&["-TERM", &pid.to_string()])
+            .output().await;
+        killed += 1;
+    }
+    if killed > 0 {
+        eprintln!("[guardian] killed {killed} stale python -m guardian process(es)");
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
 #[tauri::command]
 async fn status(state: State<'_, GuardianState>) -> Result<Status, String> {
     let root = project_root();
@@ -142,6 +164,8 @@ async fn start(app: AppHandle, state: State<'_, GuardianState>) -> Result<u32, S
         let running = state.running.lock().await;
         if *running { return Err("already running".into()); }
     }
+
+    kill_stale_guardians().await;
 
     let (python, project_root) = find_python_and_root();
     let mut cmd = Command::new(&python);
@@ -215,6 +239,10 @@ async fn start(app: AppHandle, state: State<'_, GuardianState>) -> Result<u32, S
                 guard.as_mut().and_then(|c| c.try_wait().ok().flatten())
             };
             if let Some(status) = exit_status {
+                {
+                    let mut guard = child_arc.lock().await;
+                    *guard = None;
+                }
                 *running_arc.lock().await = false;
                 let tail = tokio::fs::read_to_string(&stderr_log_for_crash)
                     .await
