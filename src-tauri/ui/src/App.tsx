@@ -272,8 +272,8 @@ export default function App() {
         {/* Main */}
         <main className="grid min-h-0 flex-1 grid-cols-[1fr_380px] gap-4 p-4">
           {/* Preview */}
-          <Spotlight className="relative flex min-h-0 flex-col overflow-hidden">
-            <div className="relative flex flex-1 items-center justify-center bg-bg/40">
+<Spotlight className="relative flex min-h-0 flex-col overflow-hidden">
+              <div className="relative flex flex-1 items-center justify-center bg-elev/60">
               {previewUrl ? (
                 <img
                   src={previewUrl}
@@ -305,7 +305,7 @@ export default function App() {
           {/* Sidebar */}
           <aside className="flex min-h-0 flex-col gap-3">
             {/* Config */}
-            <Spotlight className="flex flex-col overflow-hidden p-3" spotlightColor="rgba(255,200,87,0.10)">
+            <Spotlight className="flex flex-col overflow-hidden p-3" spotlightColor="rgba(196,122,0,0.10)">
               <div className="mb-2 flex items-center justify-between">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-dim">Config</h3>
                 <span className="font-mono text-[10px] text-grey">{configPath.split("/").pop()}</span>
@@ -327,7 +327,7 @@ export default function App() {
             </Spotlight>
 
             {/* Log */}
-            <Spotlight className="flex min-h-0 flex-1 flex-col overflow-hidden p-3" spotlightColor="rgba(94,200,255,0.10)">
+            <Spotlight className="flex min-h-0 flex-1 flex-col overflow-hidden p-3" spotlightColor="rgba(11,128,209,0.10)">
               <div className="mb-2 flex items-center justify-between">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-dim">Live log</h3>
                 <button
@@ -379,7 +379,7 @@ export default function App() {
             </Spotlight>
 
             {/* Alerts */}
-            <Spotlight className="flex flex-col overflow-hidden p-3" spotlightColor="rgba(94,221,179,0.10)">
+            <Spotlight className="flex flex-col overflow-hidden p-3" spotlightColor="rgba(31,143,95,0.10)">
               <div className="mb-2 flex items-center justify-between">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-dim">Alert replay</h3>
                 <button onClick={refreshAlerts} className="text-[10px] text-grey hover:text-text">

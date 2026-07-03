@@ -5,8 +5,8 @@
 html, body, #root {
   height: 100vh;
   margin: 0;
-  background: #0a0d18;
-  color: #f5f5fa;
+  background: #f7f8fb;
+  color: #0c1320;
   font-family: -apple-system, "SF Pro Display", "Helvetica Neue", system-ui, sans-serif;
   overflow: hidden;
 }
@@ -19,11 +19,11 @@ html, body, #root {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2a3349;
+  background: #cbd3df;
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3c82b4;
+  background: #0b80d1;
 }
 
 .no-scrollbar::-webkit-scrollbar { display: none; }

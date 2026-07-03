@@ -1,21 +1,20 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx,js,jsx}"],
-  darkMode: "class",
   theme: {
     extend: {
       colors: {
-        bg: "#0e121c",
-        panel: "#161c2a",
-        elev: "#1d2436",
-        line: "#2a3349",
-        text: "#f5f5fa",
-        dim: "#aac8ff",
-        grey: "#8c96aa",
-        cyan: { DEFAULT: "#5ec8ff", dim: "#3c82b4" },
-        yellow: "#ffc857",
-        red: "#ff6b6b",
-        green: "#5eddb3",
+        bg: "#f7f8fb",
+        panel: "#ffffff",
+        elev: "#f0f2f7",
+        line: "#dde2eb",
+        text: "#0c1320",
+        dim: "#2667d4",
+        grey: "#6b7589",
+        cyan: { DEFAULT: "#0b80d1", dim: "#7fbbe7" },
+        yellow: "#c47a00",
+        red: "#c43a3a",
+        green: "#1f8f5f",
       },
       fontFamily: {
         sans: ["-apple-system", "SF Pro Display", "Helvetica Neue", "system-ui", "sans-serif"],
