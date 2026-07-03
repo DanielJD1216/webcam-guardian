@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
@@ -138,12 +139,82 @@ async fn start(app: AppHandle, state: State<'_, GuardianState>) -> Result<u32, S
     let mut child = cmd.spawn().map_err(|e| format!("spawn {:?}: {}", python, e))?;
     let pid = child.id().unwrap_or(0);
 
-    let mut guard = state.child.lock().await;
-    *guard = Some(child);
-    drop(guard);
+    let log_dir = project_root.join("snapshots");
+    let _ = tokio::fs::create_dir_all(&log_dir).await;
+    let stdout_log = log_dir.join(format!("guardian-{}.stdout.log", pid));
+    let stderr_log = log_dir.join(format!("guardian-{}.stderr.log", pid));
+
+    if let Some(out) = child.stdout.take() {
+        let path = stdout_log.clone();
+        tokio::spawn(async move {
+            let mut file = match tokio::fs::OpenOptions::new()
+                .create(true).append(true).open(&path).await {
+                Ok(f) => Some(f),
+                Err(_) => None,
+            };
+            let mut reader = BufReader::new(out).lines();
+            while let Ok(Some(line)) = reader.next_line().await {
+                if let Some(f) = file.as_mut() {
+                    let _ = f.write_all(line.as_bytes()).await;
+                    let _ = f.write_all(b"\n").await;
+                }
+            }
+        });
+    }
+    if let Some(err) = child.stderr.take() {
+        let path = stderr_log.clone();
+        tokio::spawn(async move {
+            let mut file = match tokio::fs::OpenOptions::new()
+                .create(true).append(true).open(&path).await {
+                Ok(f) => Some(f),
+                Err(_) => None,
+            };
+            let mut reader = BufReader::new(err).lines();
+            while let Ok(Some(line)) = reader.next_line().await {
+                if let Some(f) = file.as_mut() {
+                    let _ = f.write_all(line.as_bytes()).await;
+                    let _ = f.write_all(b"\n").await;
+                }
+            }
+        });
+    }
+
+    {
+        let mut guard = state.child.lock().await;
+        *guard = Some(child);
+    }
 
     *state.running.lock().await = true;
     app.emit("guardian:started", pid).ok();
+
+    let child_arc = state.child.clone();
+    let running_arc = state.running.clone();
+    let stderr_log_for_crash = stderr_log.clone();
+    let app_handle = app.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            let exit_status = {
+                let mut guard = child_arc.lock().await;
+                guard.as_mut().and_then(|c| c.try_wait().ok().flatten())
+            };
+            if let Some(status) = exit_status {
+                *running_arc.lock().await = false;
+                let tail = tokio::fs::read_to_string(&stderr_log_for_crash)
+                    .await
+                    .unwrap_or_default();
+                let last_lines: Vec<String> = tail.lines().rev().take(50).map(String::from).collect();
+                let last_lines: Vec<String> = last_lines.into_iter().rev().collect();
+                let payload = serde_json::json!({
+                    "exit_code": status.code(),
+                    "stderr_tail": last_lines,
+                });
+                app_handle.emit("guardian:crashed", payload).ok();
+                break;
+            }
+        }
+    });
+
     Ok(pid)
 }
 

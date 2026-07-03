@@ -31,5 +31,7 @@ export const tauri = {
   assetUrl: (path: string) => convertFileSrc(path),
   onStarted: (cb: (pid: number) => void) => listen<number>("guardian:started", (e) => cb(e.payload)),
   onStopped: (cb: () => void) => listen<void>("guardian:stopped", () => cb()),
+  onCrashed: (cb: (info: { exit_code: number | null; stderr_tail: string[] }) => void) =>
+    listen<{ exit_code: number | null; stderr_tail: string[] }>("guardian:crashed", (e) => cb(e.payload)),
   onEvents: (cb: (lines: LogLine[]) => void) => listen<LogLine[]>("guardian:events", (e) => cb(e.payload ?? [])),
 };

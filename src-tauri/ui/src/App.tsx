@@ -19,14 +19,21 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "alert_error", label: "alert_err" },
 ];
 
+const RESOLUTIONS: { w: number; h: number; label: string }[] = [
+  { w: 640, h: 480, label: "640 × 480 (fastest)" },
+  { w: 1280, h: 720, label: "1280 × 720 (balanced)" },
+  { w: 1920, h: 1080, label: "1920 × 1080 (best)" },
+];
+
 function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 }
 
-function parseYamlScalar(line: string) {
-  const idx = line.indexOf(":");
-  if (idx < 0) return null;
-  return line.slice(idx + 1).trim().replace(/^['"]|['"]$/g, "");
+function parseConfigResolution(cfg: string): { w: number; h: number } | null {
+  const wm = cfg.match(/^\s*width:\s*(\d+)/m);
+  const hm = cfg.match(/^\s*height:\s*(\d+)/m);
+  if (!wm || !hm) return null;
+  return { w: parseInt(wm[1], 10), h: parseInt(hm[1], 10) };
 }
 
 function getConfigCameraIndex(cfg: string): number | null {
@@ -42,13 +49,16 @@ export default function App() {
   const [footerMsg, setFooterMsg] = useState("ready");
   const [cameraIdx, setCameraIdx] = useState<number | "scanning" | "none" | "failed">("scanning");
   const [cameras, setCameras] = useState<CameraOption[]>([]);
+  const [resolution, setResolution] = useState<{ w: number; h: number }>({ w: 1280, h: 720 });
   const [currentConfig, setCurrentConfig] = useState("");
   const [configDraft, setConfigDraft] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [logLines, setLogLines] = useState<LogLine[]>([]);
   const [alertImgs, setAlertImgs] = useState<{ name: string; url: string }[]>([]);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewState, setPreviewState] = useState<"off" | "connecting" | "live" | "disconnected">("off");
+  const [previewState, setPreviewState] = useState<"off" | "connecting" | "live" | "stale" | "disconnected">("off");
+  const [crashInfo, setCrashInfo] = useState<{ exit_code: number | null; stderr_tail: string[] } | null>(null);
+  const lastFrameAt = useRef<number>(0);
   const lastPreviewUrl = useRef<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -72,6 +82,13 @@ export default function App() {
     const interval = setInterval(refresh, 3000);
     tauri.onStarted((p) => { setRunning(true); setPid(p); setFooterMsg(`guardian started · pid ${p}`); });
     tauri.onStopped(() => { setRunning(false); setPid(null); setFooterMsg("guardian stopped"); });
+    tauri.onCrashed((info) => {
+      setRunning(false);
+      setPid(null);
+      setCrashInfo(info);
+      const last = (info.stderr_tail || []).slice(-3).join(" | ");
+      setFooterMsg(`guardian crashed (exit ${info.exit_code ?? "?"}): ${last}`);
+    });
     tauri.onEvents((lines) => setLogLines(lines));
     return () => { mounted = false; clearInterval(interval); };
   }, []);
@@ -100,6 +117,8 @@ export default function App() {
           setPreviewUrl(url);
           if (lastPreviewUrl.current) URL.revokeObjectURL(lastPreviewUrl.current);
           lastPreviewUrl.current = url;
+          lastFrameAt.current = Date.now();
+          setPreviewState("live");
         };
         ws.onclose = () => {
           setPreviewState("disconnected");
@@ -136,6 +155,8 @@ export default function App() {
       setConfigDraft(c);
       const idx = getConfigCameraIndex(c);
       if (idx != null) setCameraIdx(idx);
+      const r = parseConfigResolution(c);
+      if (r) setResolution(r);
       setFooterMsg(`config reloaded · ${c.length} chars`);
     } catch (e) {
       setFooterMsg(`read_config: ${e}`);
@@ -173,6 +194,30 @@ export default function App() {
     }
   };
 
+  const onResolutionChange = async (val: string) => {
+    const m = val.match(/^(\d+)x(\d+)$/);
+    if (!m) return;
+    const w = parseInt(m[1], 10);
+    const h = parseInt(m[2], 10);
+    setResolution({ w, h });
+    let newCfg = currentConfig.replace(/(^camera:[^\n]*\n[^\n]*width:\s*)\d+/m, `$1${w}`);
+    if (newCfg === currentConfig) {
+      newCfg = currentConfig.replace(/(^camera:[^\n]*\n)/, `$1  width: ${w}\n`);
+    }
+    newCfg = newCfg.replace(/(^camera:[^\n]*\n[^\n]*height:\s*)\d+/m, `$1${h}`);
+    if (newCfg === currentConfig) {
+      newCfg = currentConfig.replace(/(^camera:[^\n]*\n)/, `$1  height: ${h}\n`);
+    }
+    setCurrentConfig(newCfg);
+    setConfigDraft(newCfg);
+    try {
+      await tauri.writeConfig(newCfg);
+      setFooterMsg(`resolution ${w}×${h} saved — restart guardian to apply`);
+    } catch (e) {
+      setFooterMsg(`write_config: ${e}`);
+    }
+  };
+
   // ----- alerts gallery -----
   const refreshAlerts = async () => {
     try {
@@ -192,6 +237,18 @@ export default function App() {
   };
   useEffect(() => { refreshAlerts(); }, [logLines]);
   useEffect(() => { const i = setInterval(refreshAlerts, 5000); return () => clearInterval(i); }, []);
+
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => {
+      const age = Date.now() - lastFrameAt.current;
+      if (lastFrameAt.current > 0 && age > 5000 && previewState === "live") {
+        setPreviewState("stale");
+        setFooterMsg(`stream stale: no frame in ${(age/1000).toFixed(1)}s — camera may have disconnected`);
+      }
+    }, 1500);
+    return () => clearInterval(id);
+  }, [running, previewState]);
 
   // ----- actions -----
   const start = async () => {
@@ -214,8 +271,29 @@ export default function App() {
   return (
     <BackgroundGradient>
       <div className="flex h-screen flex-col">
+        {/* Crash banner */}
+        {crashInfo && (
+          <div className="border-b border-red/40 bg-red/15 px-6 py-2 font-mono text-xs text-red">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <strong className="font-sans">Guardian crashed</strong> — exit code{" "}
+                {crashInfo.exit_code ?? "?"}. Last stderr:
+                <div className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap rounded bg-bg/60 p-2">
+                  {crashInfo.stderr_tail.join("\n") || "(no stderr captured)"}
+                </div>
+              </div>
+              <button
+                onClick={() => setCrashInfo(null)}
+                className="shrink-0 rounded px-2 py-0.5 text-red hover:bg-red/20"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Topbar */}
-        <header className="flex items-center justify-between gap-6 border-b border-line bg-panel/60 px-6 py-3 backdrop-blur">
+        <header className="flex items-center justify-between gap-4 border-b border-line bg-panel/60 px-6 py-3 backdrop-blur">
           <div className="flex items-center gap-3">
             <div
               className="h-7 w-7 rounded-lg border border-cyan"
@@ -236,13 +314,23 @@ export default function App() {
               value={typeof cameraIdx === "number" ? String(cameraIdx) : ""}
               onChange={(e) => onCameraChange(parseInt(e.target.value, 10))}
               disabled={cameras.length === 0}
-              className="rounded-md border border-line bg-elev px-3 py-1.5 text-sm text-text outline-none focus:border-cyan-dim min-w-[200px] max-w-[280px]"
+              className="rounded-md border border-line bg-elev px-3 py-1.5 text-sm text-text outline-none focus:border-cyan-dim min-w-[180px] max-w-[240px]"
             >
               {cameras.length === 0 && <option value="">(scanning…)</option>}
               {cameras.map((c) => (
                 <option key={c.index} value={String(c.index)} disabled={!c.opens}>
                   {c.label}{c.placeholder ? "  — placeholder?" : ""}
                 </option>
+              ))}
+            </select>
+            <label className="ml-2 text-xs font-semibold uppercase tracking-wider text-grey">Res</label>
+            <select
+              value={`${resolution.w}x${resolution.h}`}
+              onChange={(e) => onResolutionChange(e.target.value)}
+              className="rounded-md border border-line bg-elev px-3 py-1.5 text-sm text-text outline-none focus:border-cyan-dim"
+            >
+              {RESOLUTIONS.map((r) => (
+                <option key={`${r.w}x${r.h}`} value={`${r.w}x${r.h}`}>{r.label}</option>
               ))}
             </select>
             <MovingBorder
@@ -263,8 +351,8 @@ export default function App() {
               Stop
             </MovingBorder>
             <StatusPill
-              state={running ? "running" : "stopped"}
-              label={running ? `running · pid ${pid ?? "?"}` : "stopped"}
+              state={running ? "running" : (crashInfo ? "error" : "stopped")}
+              label={running ? `running · pid ${pid ?? "?"}` : (crashInfo ? `crashed · exit ${crashInfo.exit_code ?? "?"}` : "stopped")}
             />
           </div>
         </header>
