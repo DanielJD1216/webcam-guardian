@@ -92,7 +92,7 @@ def main() -> int:
         print()
 
     print(f"Probing indices 0..{args.max_index}:")
-    print(f"  {'idx':<5} {'opens':<6} {'native':<12} {'frame':<12}  recommendation")
+    print(f"  {'idx':<5} {'opens':<6} {'native':<12} {'got':<12}  recommendation")
     working: list[tuple[int, tuple[int, int]]] = []
     for i in range(args.max_index + 1):
         ok, native, shape = probe_index(i, backend)
@@ -100,8 +100,10 @@ def main() -> int:
         native_str = (f"{native[0]}x{native[1]}" if native else "n/a")
         shape_str = (f"{shape[0]}x{shape[1]}" if shape else "n/a")
         marker = ""
-        if native and shape and native != shape:
-            marker = "  (placeholder? forced 1280x720 != native)"
+        if ok and shape is None:
+            marker = "  (opens but read failed — likely placeholder)"
+        elif ok and native and shape and native != shape:
+            marker = "  (requested res honored)"
         print(f"  {i:<5} {ok!s:<6} {native_str:<12} {shape_str:<12}  {rec}{marker}")
         if ok and shape is not None:
             working.append((i, shape))
