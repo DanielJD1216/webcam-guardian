@@ -181,6 +181,8 @@ class FrameBroadcaster:
 
             qs = parse_qs(request.path.split("?", 1)[1] if "?" in request.path else "")
             presented = (qs.get("token", [None])[0] or "").strip()
+            print(f"[ws] token check: server={self.token!r} presented={presented!r} match={presented == self.token}",
+                  file=sys.stderr, flush=True)
             if self.token:
                 if presented == self.token:
                     pass  # URL-token match — proceed.
@@ -200,6 +202,8 @@ class FrameBroadcaster:
                     # Wrong token presented in URL — reject immediately.
                     # Don't burn 2 s on the wait_for fallback: presenting
                     # a wrong token is a hard fail, not a soft one.
+                    print(f"[ws] reject: token mismatch (presented={presented!r})",
+                          file=sys.stderr, flush=True)
                     await conn.close(code=1008, reason="bad token")
                     return
 
