@@ -96,7 +96,46 @@ def snapshot_save(frame, snapshots_dir: str | Path, name: str, quality: int = 85
     if not ok:
         raise RuntimeError("JPEG encode failed")
     target.write_bytes(buf.tobytes())
-    return target
+
+
+def blur_person_boxes(frame,
+                     boxes: list[tuple[int, int, int, int]],
+                     top_fraction: float = 0.4):
+    """audit #66: privacy by default. Apply Gaussian blur to the
+    top `top_fraction` of each person bounding box in `frame`.
+    Returns the modified frame (does not mutate input).
+
+    We use the RT-DETR/YOLO person detection boxes (no face
+    detection — Haar cascades fail open on missed faces, which is
+    a worse privacy posture than no blur at all). Top third of a
+    person box is where the head/face sits, so a strong blur there
+    obscures identifying features for typical indoor scenes.
+    """
+    import cv2
+
+    if frame is None or not boxes or top_fraction <= 0.0:
+        return frame
+    out = frame.copy()
+    h, w = out.shape[:2]
+    for (x1, y1, x2, y2) in boxes:
+        ix1 = max(0, min(w, int(x1)))
+        ix2 = max(0, min(w, int(x2)))
+        iy1 = max(0, min(h, int(y1)))
+        iy2 = max(0, min(h, int(y2)))
+        if ix2 <= ix1 or iy2 <= iy1:
+            continue
+        face_h = int((iy2 - iy1) * top_fraction)
+        face_h = max(1, min(face_h, iy2 - iy1))
+        # Kernel sized to a fraction of the face region; cap at 99
+        # so cv2.GaussianBlur doesn't reject odd dimensions.
+        k = max(15, min(99, (face_h // 4) | 1))
+        if k % 2 == 0:
+            k += 1
+        roi = out[iy1:iy1 + face_h, ix1:ix2]
+        if roi.size == 0:
+            continue
+        out[iy1:iy1 + face_h, ix1:ix2] = cv2.GaussianBlur(roi, (k, k), 0)
+    return out
 
 
 def prune_older_than(snapshots_dir: str | Path,
