@@ -71,22 +71,26 @@ def _make_guard(cfg) -> GuardBackend:
 class FrameBroadcaster:
     """Latest-frame holder + asyncio WS server.
 
-    The main loop calls `push(jpeg_bytes, w, h)` after every draw. The WS server
-    broadcasts to all connected clients at whatever rate they request.
+    The main loop calls `push(jpeg_bytes, w, h, seq)` after every draw. The
+    WS server broadcasts to all connected clients — but ONLY when the
+    sequence number advances, so a frozen camera does not push the
+    same JPEG at 10 Hz and defeat the Tauri UI's staleness detector
+    (audit finding #20).
     """
 
     def __init__(self, port: int = 9876) -> None:
         self.port = port
-        self._latest: tuple[bytes, int, int] | None = None
+        self._latest: tuple[bytes, int, int, int] | None = None  # (jpeg, w, h, seq)
         self._lock = threading.Lock()
+        self._last_broadcast_seq: int = -1
         self._loop: asyncio.AbstractEventLoop | None = None
         self._clients: set = set()
         self._thread: threading.Thread | None = None
         self._stopped = threading.Event()
 
-    def push(self, jpeg: bytes, w: int, h: int) -> None:
+    def push(self, jpeg: bytes, w: int, h: int, seq: int) -> None:
         with self._lock:
-            self._latest = (jpeg, w, h)
+            self._latest = (jpeg, w, h, seq)
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run, daemon=True, name="ws-broadcaster")
@@ -124,6 +128,14 @@ class FrameBroadcaster:
                     frame = self._latest
                 if not frame or not self._clients:
                     continue
+                # audit #20: only broadcast when the camera produced a
+                # NEW frame since the last broadcast. A frozen camera
+                # (same seq across polls) leaves the UI staleness
+                # detector able to fire.
+                _, _, _, seq = frame
+                if seq == self._last_broadcast_seq:
+                    continue
+                self._last_broadcast_seq = seq
                 payload = f"{frame[1]}x{frame[2]}\n".encode() + frame[0]
                 dead = []
                 for c in list(self._clients):
@@ -367,18 +379,35 @@ def main(argv: Optional[list[str]] = None) -> int:
     cached_detections: list = []   # boxes held between analyzed frames so the
                                   # overlay doesn't blink at camera fps (30)
     t_start = time.monotonic()
+    last_frame_seq = 0             # audit #1: detect camera stall via seq
+    last_stall_log_ts = 0.0        # throttle camera_stalled events to 1 / 5s
 
     try:
         while True:
-            frame = cam.read()
+            frame, seq, cap_t = cam.read()
             if frame is None:
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     return 0
                 continue
             now = time.monotonic()
             frames_seen += 1
-            cam_window.append(now)
+            cam_window.append(cap_t)
             cam_window = [t for t in cam_window if now - t < 1.0]
+
+            # audit #1: if the camera isn't producing fresh frames,
+            # log a stall event (throttled to once per 5 s). Without
+            # this the guardian happily re-analyzes a frozen frame.
+            if seq == last_frame_seq and now - t_start > 1.0:
+                if now - last_stall_log_ts > 5.0:
+                    log.log({
+                        "type": "camera_stalled",
+                        "last_seq": seq,
+                        "since_s": round(now - (cap_t or now), 1),
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                    })
+                    last_stall_log_ts = now
+            else:
+                last_frame_seq = seq
 
             interval = 1.0 / max(1, cfg.guard.analyzed_fps)
             if now - last_analysis >= interval:
@@ -444,7 +473,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                     break
                 ok_jpg, jpg = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
                 if ok_jpg:
-                    broadcaster.push(jpg.tobytes(), frame.shape[1], frame.shape[0])
+                    broadcaster.push(jpg.tobytes(), frame.shape[1], frame.shape[0], seq)
 
             if args.max_frames and frames_seen >= args.max_frames:
                 break

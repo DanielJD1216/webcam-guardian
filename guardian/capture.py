@@ -5,12 +5,26 @@ Trap-list reminders (§13):
   trap 3 — cv2.imshow/waitKey MUST be on the main thread (handled in main.py).
   trap 7 — macOS TCC: denial looks like read() returning no frames, not an error.
   trap 8 — explicit AVFOUNDATION on macOS.
+
+Audit review additions:
+  - Each captured frame is stamped with a monotonic capture_time and a
+    sequence number so consumers (the main loop, the WS broadcaster)
+    can tell a fresh frame from a frozen one. This is the core
+    mitigation for audit finding #1 (silent camera stall): without
+    a sequence, the main loop happily re-analyzes the last good frame
+    forever while reporting healthy fps.
+  - The reader increments sequence/time on every successful read but
+    never clears them. read() returns (None, 0, 0) when the camera
+    has never produced a frame yet; (frame, seq, t) on every call.
+    - The shutdown race (audit #1 low) is partially mitigated by
+      exposing the reader Thread handle so callers can join it.
 """
 
 from __future__ import annotations
 
 import sys
 import threading
+import time
 
 import cv2
 
@@ -24,7 +38,13 @@ def default_backend() -> int:
 
 
 class LatestFrameCamera:
-    """Reader thread consumes at camera rate; callers always get the newest frame."""
+    """Reader thread consumes at camera rate; callers always get the newest frame.
+
+    Returned tuple: (frame_bgr_or_None, sequence, capture_monotonic).
+    Sequence starts at 0 and increments by 1 per successful frame.
+    A repeat sequence means a frozen frame (camera stalled or revoked);
+    the main loop should treat that as a fault.
+    """
 
     def __init__(self, index: int = 0, backend: int | None = None,
                  width: int = 1280, height: int = 720) -> None:
@@ -39,8 +59,11 @@ class LatestFrameCamera:
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # best-effort (V4L2 honors)
         self._lock = threading.Lock()
         self._frame = None
+        self._seq: int = 0
+        self._capture_time: float = 0.0
         self._stopped = False
-        threading.Thread(target=self._reader, daemon=True, name="cam-reader").start()
+        self._thread = threading.Thread(target=self._reader, daemon=True, name="cam-reader")
+        self._thread.start()
 
     def _reader(self) -> None:
         while not self._stopped:
@@ -48,13 +71,25 @@ class LatestFrameCamera:
             if ok:
                 with self._lock:
                     self._frame = frame
+                    self._seq += 1
+                    self._capture_time = time.monotonic()
 
     def read(self):
+        """Returns (frame_or_None, sequence, capture_monotonic)."""
         with self._lock:
-            return None if self._frame is None else self._frame.copy()
+            if self._frame is None:
+                return (None, 0, 0.0)
+            return (self._frame.copy(), self._seq, self._capture_time)
+
+    def last_seq(self) -> int:
+        with self._lock:
+            return self._seq
 
     def release(self) -> None:
         self._stopped = True
+        # Audit #1 low: don't release cap while reader may be inside read().
+        if self._thread.is_alive():
+            self._thread.join(timeout=1.0)
         try:
             self.cap.release()
         except Exception:
