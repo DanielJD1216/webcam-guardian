@@ -77,9 +77,15 @@ export default function App() {
         setRunning(s.running);
         setPid(s.pid);
         setConfigPath(s.config_path);
-        // audit #50: projectRoot is unused; drop the state to satisfy
-        // noUnusedLocals. The path is already visible in the preview
-        // bar (`config: ${configPath}`) and the StatusBar.
+        // audit #a85: also sync ws_token from status. Without this, if
+        // the page loads (or the status poll runs) AFTER the user
+        // already clicked Start, the onStarted event was missed and
+        // wsTokenRef.current stays null → live preview connects with
+        // empty token → server rejects with 1008 "bad or missing token"
+        // → preview stays "Disconnected. Restarting..." forever.
+        if (s.ws_token) {
+          wsTokenRef.current = s.ws_token;
+        }
         setLogLines(s.log_lines || []);
       } catch (e) {
         setFooterMsg(`status: ${e}`);

@@ -233,6 +233,17 @@ Done in Wave 3:
         ~5 s even when the camera was perfectly healthy. Fix:
         use the capture_monotonic timestamp (`now - cap_t > 1.0`)
         instead of seq-equality as the actual stall signal.
+- [x] **#a85 (new — caught by ws_token debug log)** — Live preview
+        stayed at "Disconnected. Restarting..." even after #a80
+        whitelisted the Tauri dev origin. The WS server accepted
+        the connection but the URL had no `?token=` query string,
+        so the token check rejected it. Root cause: the React
+        `refresh()` polled `tauri.status()` and read `running`/`pid`
+        but never read `s.ws_token`. The `onStarted` event that
+        carries `{ pid, ws_token }` was missed whenever the page
+        loaded (or the status poll ran) AFTER the user already
+        clicked Start. Fix: sync `wsTokenRef.current` from
+        `s.ws_token` on every status poll.
 
 ## Wave 11 (planned)
 
