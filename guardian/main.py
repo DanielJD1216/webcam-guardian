@@ -228,7 +228,7 @@ class DetectiveWorker(threading.Thread):
         self.channels = channels
         self.log = log
         self.cfg = cfg
-        self._stop = threading.Event()
+        self._stop_event = threading.Event()  # e2e/a79: was self._stop — shadowed threading.Thread._stop() called from join()
         self._frame_provider = frame_provider  # for snapshot save
 
     def submit(self, frame_copy, labels: list[str], now: float) -> bool:
@@ -241,10 +241,10 @@ class DetectiveWorker(threading.Thread):
             return False
 
     def stop(self) -> None:
-        self._stop.set()
+        self._stop_event.set()
 
     def run(self) -> None:
-        while not self._stop.is_set():
+        while not self._stop_event.is_set():
             try:
                 frame, labels, now = self.q.get(timeout=0.5)
             except queue.Empty:
@@ -264,10 +264,11 @@ class DetectiveWorker(threading.Thread):
                 # most-recently-saved frame is included in the alert
                 # delivery. The two are no longer conflated.
                 escalation_id = f"escalation_{int(time.time()*1000):013d}"
+                snap_dir = Path(self.cfg.log.snapshots_dir)  # e2e/a78: was str→str TypeError when alert.attach_snapshot=True and save_escalation_frames=True
                 if self.cfg.log.save_escalation_frames:
                     try:
                         snapshot_save(
-                            frame, self.cfg.log.snapshots_dir,
+                            frame, snap_dir,
                             f"{escalation_id}.jpg",
                         )
                     except Exception as e:
@@ -291,11 +292,11 @@ class DetectiveWorker(threading.Thread):
                         # name keeps the alert gallery organized. If
                         # save_escalation_frames is off, save fresh.
                         if self.cfg.log.save_escalation_frames:
-                            snap = self.cfg.log.snapshots_dir / f"{escalation_id}.jpg"
+                            snap = snap_dir / f"{escalation_id}.jpg"
                         else:
                             try:
                                 snap = snapshot_save(
-                                    frame, self.cfg.log.snapshots_dir,
+                                    frame, snap_dir,
                                     f"{alert_id}.jpg",
                                 )
                             except Exception as e:
