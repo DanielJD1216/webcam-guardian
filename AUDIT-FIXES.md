@@ -54,7 +54,7 @@ note below.
   quarantined on macOS 15+/26 with no right-click bypass.
   Requires an Apple Developer ID and APPLE_API_KEY env vars.
 
-## Wave 3 (in progress)
+## Wave 3 (done)
 
 UX polish + remaining low-risk quality fixes. Closing medium
 findings as they touch the same code paths.
@@ -74,30 +74,51 @@ Done in Wave 3:
         thread, not at dequeue on the worker. Prevents duplicate
         paid detective calls when M3 is slow.
 
-## Wave 4 (planned)
+## Wave 4 (done)
 
-- #62 — Continuity Camera offline alert
+- [x] #58 — `log.save_escalation_frames` now actually controls
+        per-escalation frame persistence (was silently AND-ed
+        with `alert.attach_snapshot`). SECURITY.md's instruction
+        "set save_escalation_frames: false to stop persisting frames"
+        is now a real control. LocateAnythingGuard.jpeg_quality
+        AttributeError fixed (hard-coded to 80 in the guard).
+- [x] #73 — Detective prompt now includes the IANA tzname so the
+        model knows whether "Local time" is home-TZ or away-TZ
+        when the user is traveling.
+- [x] #74 — Alert title + body include tzname + UTC timestamp so
+        a user reviewing alerts after travel knows when each event
+        actually happened.
+- [x] #62 — Camera-offline alert. When a camera stalls >5 s,
+        fires a one-shot "Webcam Guardian · camera_offline"
+        through the existing channels; fires a "camera_restored"
+        on recovery. Doesn't burn the hourly alert cap. Closes the
+        "system silently goes blind" silent safety failure.
+
+## Wave 5 (planned)
+
 - #75 — Watchdog per-start accumulation guard
-- #77 — WebSocket auto-reconnect after network sleep
-- #50 residual — log-tail live status pill uses the right value
-- #73/74 — Timezone in alerts and detective prompt
+- #77 — WebSocket auto-reconnect after network sleep (partially
+        done — reconnect loop exists, but no exponential backoff
+        and no cancellation on Stop)
 - #36 — Test coverage gaps
 - #56 — JSON Schema for config.yaml
-- #58 — Dead config fields sweep
+- #50 residual — log-tail live status pill uses the right value
 - #29 follow-up — Date-grouping of alert gallery
 - #34 — Color contrast (WCAG)
 - #33 — Keyboard navigation
+- #65 — Detective prompt: no protected-attribute output
+- #66 — GDPR face-blur in stored snapshots
+- #54 — JSONL format robustness
+- #52 — useEffect cleanup audit
+- #53 — Tailwind opacity-modifier compat check
+- #51 — Tailwind palette drift check
 
 ## Lower-priority
 
 - #41 (full) — Tauri sidecar bundling + signing + notarization
 - #67 — README Continuity Camera failure-modes section
 - #68 — Continuity Camera latency graceful-degrade
-- #52 — useEffect cleanup audit
-- #53 — Tailwind opacity-modifier compat check
-- #51 — Tailwind palette drift check
-- #65 — Detective prompt: no protected-attribute output
-- #66 — GDPR face-blur in stored snapshots
 - #54 — JSONL format robustness (embedded newlines)
+- #52 — useEffect cleanup audit
 
 Medium findings, batched by domain.
