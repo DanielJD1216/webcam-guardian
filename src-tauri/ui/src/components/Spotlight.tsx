@@ -7,7 +7,12 @@ interface SpotlightProps {
   spotlightColor?: string;
 }
 
-export function Spotlight({ children, className, spotlightColor = "rgba(94,200,255,0.18)" }: SpotlightProps) {
+export function Spotlight({ children, className,
+  // audit #51: rgba(94,200,255,0.18) is the old dark-theme cyan and
+  // didn't match the other three panel overrides. Default to the
+  // current palette cyan so all four Spotlights match.
+  spotlightColor = "rgba(11,128,209,0.18)"
+}: SpotlightProps) {
   const [pos, setPos] = useState({ x: -200, y: -200 });
   const [opacity, setOpacity] = useState(0);
 

@@ -466,6 +466,24 @@ def main(argv: Optional[list[str]] = None) -> int:
              "device": resolve_device(cfg.guard.device),
              "ts": _ts()})
 
+    # audit #66 follow-up: GDPR/CCPA storage-limitation. When
+    # log.retention_days > 0, prune snapshots and events older than
+    # that many days at startup. Default is 0 (off) for backwards
+    # compat; the README Privacy section suggests a positive value
+    # for self-hosters concerned about retention.
+    if cfg.log.retention_days > 0:
+        from .storage import prune_older_than
+        n_snap, n_event = prune_older_than(
+            cfg.log.snapshots_dir, cfg.log.events_path,
+            cfg.log.retention_days,
+        )
+        if n_snap or n_event:
+            log.log({"type": "retention_sweep",
+                      "deleted_snapshots": n_snap,
+                      "deleted_event_lines": n_event,
+                      "kept_days": cfg.log.retention_days,
+                      "ts": _ts()})
+
     backend = _camera_backend(cfg.camera.backend)
     try:
         cam = LatestFrameCamera(index=cfg.camera.index, backend=backend,

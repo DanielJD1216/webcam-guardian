@@ -54,3 +54,9 @@ log:
   events_path: events.jsonl
   snapshots_dir: snapshots
   save_escalation_frames: true
+  # audit #66 follow-up: GDPR/CCPA storage limitation. Set to 0 to
+  # disable pruning. Otherwise snapshots/alert_*.jpg and events.jsonl
+  # lines older than this many days are deleted at guardian boot.
+  # Recommended for self-hosters: 30. Recommended for high-traffic
+  # cameras: 7.
+  retention_days: 0

@@ -90,6 +90,12 @@ class LogCfg:
     events_path: str = "events.jsonl"
     snapshots_dir: str = "snapshots"
     save_escalation_frames: bool = True
+    # audit #66 follow-up: identifiable data (alert snapshots +
+    # person descriptions in events.jsonl) accumulates indefinitely.
+    # Set to 0 to disable pruning (default off for backwards compat);
+    # otherwise deletes events and snapshots older than N days at
+    # every guardian boot.
+    retention_days: int = 0
 
 
 @dataclass(frozen=True)
@@ -212,6 +218,7 @@ def _log(raw: dict) -> LogCfg:
         events_path=str(raw.get("events_path", "events.jsonl")),
         snapshots_dir=str(raw.get("snapshots_dir", "snapshots")),
         save_escalation_frames=bool(raw.get("save_escalation_frames", True)),
+        retention_days=int(raw.get("retention_days", 0)),
     )
 
 

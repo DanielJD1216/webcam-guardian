@@ -10,7 +10,10 @@ interface MovingBorderProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 export function MovingBorder({
   children,
-  borderColor = "#5ec8ff",
+  // audit #51: the old "#5ec8ff" was the dark-theme cyan and was
+  // nearly invisible against the light-theme panels. Default to the
+  // current palette cyan so the animated border is actually visible.
+  borderColor = "#0b80d1",
   duration = 6000,
   variant = "primary",
   className,

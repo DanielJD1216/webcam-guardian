@@ -97,3 +97,60 @@ def snapshot_save(frame, snapshots_dir: str | Path, name: str, quality: int = 85
         raise RuntimeError("JPEG encode failed")
     target.write_bytes(buf.tobytes())
     return target
+
+
+def prune_older_than(snapshots_dir: str | Path,
+                     events_path: str | Path,
+                     days: int) -> tuple[int, int]:
+    """audit #66: GDPR/CCPA storage limitation. Prunes snapshots
+    older than `days` days and rewrites events.jsonl to drop
+    lines older than that. Returns (n_snapshots_deleted,
+    n_event_lines_deleted).
+    """
+    from datetime import datetime, timedelta
+    if days <= 0:
+        return (0, 0)
+    cutoff_ms = (datetime.now() - timedelta(days=days)).timestamp() * 1000
+
+    snap_dir = Path(snapshots_dir)
+    snap_dir.mkdir(parents=True, exist_ok=True)
+    n_snap = 0
+    if snap_dir.exists():
+        for f in list(snap_dir.iterdir()):
+            if not f.is_file() or not f.name.startswith("alert_") or not f.name.endswith(".jpg"):
+                continue
+            # alert_<unix_ms>.jpg
+            try:
+                ts = int(f.name.removeprefix("alert_").removesuffix(".jpg"))
+            except ValueError:
+                continue
+            if ts < cutoff_ms:
+                try:
+                    f.unlink()
+                    n_snap += 1
+                except OSError:
+                    pass
+
+    n_event = 0
+    events = Path(events_path)
+    if events.exists():
+        kept = []
+        for line in events.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                obj = json.loads(line)
+                ts_str = obj.get("ts", "")
+                # ts is in ISO with offset (e.g. "2026-07-02T22:23:54+00:00")
+                dt = datetime.fromisoformat(ts_str)
+                if dt.timestamp() * 1000 >= cutoff_ms:
+                    kept.append(line)
+                else:
+                    n_event += 1
+            except (ValueError, json.JSONDecodeError):
+                kept.append(line)  # malformed line — keep for forensics
+
+        if n_event > 0:
+            tmp = events.with_suffix(".jsonl.tmp")
+            tmp.write_text("\n".join(kept) + "\n", encoding="utf-8")
+            tmp.replace(events)
+
+    return (n_snap, n_event)

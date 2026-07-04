@@ -87,24 +87,35 @@ export default function App() {
     };
     refresh();
     const interval = setInterval(refresh, 3000);
-    tauri.onStarted((p) => {
-      // audit #3: the payload is now { pid, ws_token } not just pid.
-      const info = (typeof p === "object" && p) ? p : { pid: p, ws_token: null };
-      setRunning(true);
-      setPid(info.pid ?? null);
-      wsTokenRef.current = info.ws_token ?? null;
-      setFooterMsg(`guardian started · pid ${info.pid ?? "?"}`);
-    });
-    tauri.onStopped(() => { setRunning(false); setPid(null); setFooterMsg("guardian stopped"); });
-    tauri.onCrashed((info) => {
-      setRunning(false);
-      setPid(null);
-      setCrashInfo(info);
-      const last = (info.stderr_tail || []).slice(-3).join(" | ");
-      setFooterMsg(`guardian crashed (exit ${info.exit_code ?? "?"}): ${last}`);
-    });
-    tauri.onEvents((lines) => setLogLines(lines));
-    return () => { mounted = false; clearInterval(interval); };
+    // audit #52: tauri.onX listeners return Promise<UnlistenFn>; collect
+    // them so the effect cleanup can detach on unmount. In production
+    // the App component never unmounts (impact nil), but React.StrictMode
+    // dev double-mounts and any future HMR/routing would compound
+    // duplicate listeners without this.
+    const subs: Array<Promise<() => void>> = [
+      tauri.onStarted((p) => {
+        // audit #3: the payload is now { pid, ws_token } not just pid.
+        const info = (typeof p === "object" && p) ? p : { pid: p, ws_token: null };
+        setRunning(true);
+        setPid(info.pid ?? null);
+        wsTokenRef.current = info.ws_token ?? null;
+        setFooterMsg(`guardian started · pid ${info.pid ?? "?"}`);
+      }),
+      tauri.onStopped(() => { setRunning(false); setPid(null); setFooterMsg("guardian stopped"); }),
+      tauri.onCrashed((info) => {
+        setRunning(false);
+        setPid(null);
+        setCrashInfo(info);
+        const last = (info.stderr_tail || []).slice(-3).join(" | ");
+        setFooterMsg(`guardian crashed (exit ${info.exit_code ?? "?"}): ${last}`);
+      }),
+      tauri.onEvents((lines) => setLogLines(lines)),
+    ];
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+      for (const s of subs) s.then((u) => u());
+    };
   }, []);
 
   // ----- live preview websocket -----
