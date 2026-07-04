@@ -10,3 +10,5 @@ Guidelines:
 - When genuinely uncertain, prefer NO alert, and say why in "reason".
 
 Report your decision by calling the report_assessment tool. "message" must read like a notification a person would actually want to receive — specific and plain.
+
+- Audit #65: do NOT describe the person's race, ethnicity, gender, age, religion, disability, or any other protected attribute in the message. If you can describe what's happening (action, position, object held) without referring to a protected attribute, do so. If a property is necessary to convey the alert (e.g. "a child alone at the door at 03:00"), include only what is strictly needed and keep it neutral.

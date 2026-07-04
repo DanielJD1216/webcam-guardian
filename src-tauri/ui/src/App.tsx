@@ -353,6 +353,34 @@ export default function App() {
     if (isYesterday) return `Yesterday ${time}`;
     return `${t.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
   }
+
+  // audit #29 follow-up: bucket alerts by date for the gallery.
+  // Returns an ordered map from bucket label → array of items.
+  function groupAlertsByDate(
+    items: { name: string; url: string; when: string }[],
+  ): Record<string, typeof items> {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    const buckets: Record<string, typeof items> = {};
+    for (const a of items) {
+      const m = a.name.match(/^alert_(\d+)\.jpg$/);
+      if (!m) {
+        (buckets["Earlier"] ??= []).push(a);
+        continue;
+      }
+      const t = new Date(parseInt(m[1], 10));
+      t.setHours(0, 0, 0, 0);
+      const key =
+        t.getTime() === today.getTime() ? "Today"
+        : t.getTime() === yesterday.getTime() ? "Yesterday"
+        : t.toLocaleDateString([], { month: "short", day: "numeric" });
+      (buckets[key] ??= []).push(a);
+    }
+    return buckets;
+  }
+
   useEffect(() => { refreshAlerts(); }, [logLines]);
   useEffect(() => { const i = setInterval(refreshAlerts, 5000); return () => clearInterval(i); }, []);
 
@@ -614,17 +642,28 @@ export default function App() {
                 {alertImgs.length === 0 ? (
                   <div className="py-4 text-center text-[11px] text-grey">No alerts yet.</div>
                 ) : (
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {alertImgs.map((a) => (
-                      <div key={a.name} className="relative">
-                        <img
-                          src={a.url}
-                          title={a.name}
-                          className="aspect-video w-full rounded border border-line object-cover transition hover:border-cyan"
-                          loading="lazy"
-                        />
-                        <div className="absolute bottom-0 left-0 right-0 truncate rounded-b bg-bg/80 px-1 py-0.5 text-center font-mono text-[9px] text-grey">
-                          {a.when ?? a.name}
+                  /* audit #29 follow-up: group by date bucket so a
+                     week's worth of alerts is scannable instead of a
+                     single flat grid. Today, Yesterday, and earlier
+                     dates each get a small label. */
+                  <div className="flex flex-col gap-2">
+                    {Object.entries(groupAlertsByDate(alertImgs)).map(([bucket, items]) => (
+                      <div key={bucket}>
+                        <div className="mb-1 text-[10px] uppercase tracking-wider text-grey">{bucket}</div>
+                        <div className="grid grid-cols-4 gap-1.5">
+                          {items.map((a) => (
+                            <div key={a.name} className="relative">
+                              <img
+                                src={a.url}
+                                title={a.name}
+                                className="aspect-video w-full rounded border border-line object-cover transition hover:border-cyan"
+                                loading="lazy"
+                              />
+                              <div className="absolute bottom-0 left-0 right-0 truncate rounded-b bg-bg/80 px-1 py-0.5 text-center font-mono text-[9px] text-grey">
+                                {a.when ?? a.name}
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     ))}

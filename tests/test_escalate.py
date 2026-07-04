@@ -68,7 +68,7 @@ def test_cooldown_burns_money_on_lingering_false_positive_runs_out():
     assert should2 is True, "after cooldown expires, the next call must fire"
 
 
-def test_three_consecutive_presence_fires():
+def test_three_consecutive_presence_fires_and_cooldown():
     e = Escalator(debounce_frames=3, cooldown_seconds=45)
     now = 1000.0
     e.observe({"person"}, now)
@@ -76,10 +76,11 @@ def test_three_consecutive_presence_fires():
     should, labels, _ = e.observe({"person"}, now + 0.1)
     assert should is True
     assert labels == {"person"}
-    should, labels, _ = e.observe({"person"}, now)
+    # audit #36: the original second test was a shadow of this one
+    # that reused a stale `now`. The combined test exercises the
+    # full flow: fire -> dispatch -> cooldown blocks -> expires.
     e.on_dispatch(labels, now)
     should2, _, remaining = e.observe({"person"}, now + 5.0)
-    assert should is True
     assert should2 is False
     assert remaining.get("person", 0) >= 40
 

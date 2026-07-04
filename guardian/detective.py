@@ -90,6 +90,25 @@ def encode_frame(frame_bgr, long_side: int = 1024, quality: int = 80) -> str:
     return base64.b64encode(buf).decode("ascii")
 
 
+def parse_decision(msg) -> tuple[dict | None, str | None]:
+    """audit #36: extract the parse-and-validate block of
+    Detective.judge into a pure function so the trap-13 safety
+    property (garbage in → alert:false, no crash) can be tested
+    directly. Returns (decision, parse_error). decision is None when
+    no valid JSON could be extracted.
+    """
+    try:
+        if getattr(msg, "tool_calls", None):
+            decision = json.loads(msg.tool_calls[0].function.arguments)
+        else:
+            text = THINK_RE.sub("", msg.content or "").strip()
+            m = re.search(r"\{.*\}", text, re.DOTALL)
+            decision = json.loads(m.group(0)) if m else None
+        return decision, None
+    except (json.JSONDecodeError, AttributeError, IndexError) as e:
+        return None, repr(e)
+
+
 def load_system_prompt(cfg: DetectiveCfg, override_path: str | None) -> str:
     """Per BUILD-PLAN §15: judge.txt is the user-editable surface for house rules."""
     if override_path and os.path.exists(override_path):
@@ -200,17 +219,10 @@ class Detective:
             self.tool_call_accepted = True
 
         msg = resp.choices[0].message
-        decision: dict | None = None
-        parse_error: str | None = None
-        try:
-            if getattr(msg, "tool_calls", None):
-                decision = json.loads(msg.tool_calls[0].function.arguments)
-            else:
-                text = THINK_RE.sub("", msg.content or "").strip()
-                m = re.search(r"\{.*\}", text, re.DOTALL)
-                decision = json.loads(m.group(0)) if m else None
-        except (json.JSONDecodeError, AttributeError, IndexError) as e:
-            parse_error = repr(e)
+        # audit #36: parse-and-validate extracted into parse_decision()
+        # so the trap-13 safety property (garbage in → alert:false,
+        # no crash) is unit-testable.
+        decision, parse_error = parse_decision(msg)
 
         if not isinstance(decision, dict) or "alert" not in decision:
             decision = {
