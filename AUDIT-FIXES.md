@@ -155,13 +155,28 @@ Done in Wave 3:
         and events older than N days are deleted at boot. Malformed
         lines are kept for forensics.
 
-## Wave 9 (planned)
+## Wave 9 (done)
+
+- [x] #52 follow-up — refreshAlerts was firing twice (on the
+        [logLines] effect and on the 5 s interval). Dropped the
+        [logLines] effect; the live event push keeps the log
+        current without a separate list_alerts per status poll.
+        Saves one IPC + one list_alerts per status poll.
+- [x] #51 follow-up — 'dim' token renamed to 'accent' (was a dark-
+        theme leftover name; the token is a vivid blue used for
+        headings, not a tonal variant). The cyan.dim subfield stays
+        as cyan.dim (it really is a tonal variant). Updated the
+        three text-accent uses in App.tsx.
+- [x] #53 — Tailwind opacity-modifier compatibility verified under
+        pinned 3.4.14. All the bg-*/15, bg-*/30, text-*/N classes
+        compile correctly. The custom hex colors (e.g. #0b80d1) are
+        auto-rewritten to rgb(r g b / <alpha>) so bg-cyan/10
+        produces the right alpha.
+
+## Wave 10 (planned)
 
 - #66 (full) — GDPR face-blur in stored snapshots
-- #53 — Tailwind opacity-modifier compat check
-- #52 follow-up — refreshAlerts keyed on [logLines] (duplicate IPC)
-- #51 follow-up — rename `dim` token (dark-theme leftover)
-- #54 follow-up — `default=str` is a footgun (suggests review)
+- #54 follow-up — `default=str` is a footgun (review suggested)
 
 ## Lower-priority
 
