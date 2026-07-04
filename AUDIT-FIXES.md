@@ -126,11 +126,24 @@ Done in Wave 3:
         this — text color was being inherited instead of set per
         state).
 
-## Wave 7 (planned)
+## Wave 7 (done)
 
-- #56 — JSON Schema for config.yaml
+- [x] #56 — Unknown / misspelled config keys are loud at boot.
+        Per-section allow-list plus a cross-field check that every
+        trigger/draw class is mapped in coco_ids. A typo'd
+        `trigger_clases:` no longer silently defaults.
+- [x] #57 — alert.email.api_key_env is now plumbed through to
+        ResendChannel — the dead config knob is now alive.
+- [x] #54 — EventLog.log is now safe under disk-full / closed-file
+        conditions (catches OSError + ValueError, falls back to
+        stderr) so a logging failure can't kill the detective
+        worker. NaN / +Inf / -Inf are sanitized to None before
+        serialization so the JSONL line is always parseable JSON
+        (no more silent drop in the Tauri log viewer).
+
+## Wave 8 (planned)
+
 - #66 — GDPR face-blur in stored snapshots
-- #54 — JSONL format robustness
 - #52 — useEffect cleanup audit
 - #53 — Tailwind opacity-modifier compat check
 - #51 — Tailwind palette drift check
