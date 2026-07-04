@@ -190,6 +190,15 @@ Done in Wave 3:
         Path object. Fix in `guardian/main.py`: wrap with `Path()`
         once at the top of the alert block. Regression test
         `tests/test_worker_path.py` exercises this exact combination.
+- [x] **#a79 (new — caught by E2E CI)** — `DetectiveWorker._stop`
+        shadowed `threading.Thread._stop()` (an internal CPython
+        method invoked from `Thread.join()`). The original method
+        became a `threading.Event`; calling it raised
+        `TypeError: 'Event' object is not callable`, surfaced as a
+        failing `worker.join()` in tests. The bug existed since Wave
+        1 but was masked in production because `main()` exits the
+        process before any daemon thread's join lifecycle matters.
+        Fix in `guardian/main.py`: rename to `_stop_event`.
 
 ## Wave 11 (planned)
 

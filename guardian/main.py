@@ -228,7 +228,7 @@ class DetectiveWorker(threading.Thread):
         self.channels = channels
         self.log = log
         self.cfg = cfg
-        self._stop = threading.Event()
+        self._stop_event = threading.Event()  # e2e/a79: was self._stop — shadowed threading.Thread._stop() called from join()
         self._frame_provider = frame_provider  # for snapshot save
 
     def submit(self, frame_copy, labels: list[str], now: float) -> bool:
@@ -241,10 +241,10 @@ class DetectiveWorker(threading.Thread):
             return False
 
     def stop(self) -> None:
-        self._stop.set()
+        self._stop_event.set()
 
     def run(self) -> None:
-        while not self._stop.is_set():
+        while not self._stop_event.is_set():
             try:
                 frame, labels, now = self.q.get(timeout=0.5)
             except queue.Empty:
