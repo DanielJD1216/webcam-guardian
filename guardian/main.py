@@ -204,11 +204,21 @@ class FrameBroadcaster:
                     return
 
             self._clients.add(conn)
+            print(f"[ws] client added (n={len(self._clients)})", file=sys.stderr, flush=True)
             try:
-                async for _ in conn:
-                    pass
+                async for msg in conn:
+                    # DEBUG: surface any message the client sends so we
+                    # can see if the UI is sending keepalives or
+                    # close handshakes that we didn't expect.
+                    print(f"[ws] msg from client: {msg!r}",
+                          file=sys.stderr, flush=True)
+            except Exception as e:
+                print(f"[ws] client loop exception: {e!r}",
+                      file=sys.stderr, flush=True)
             finally:
                 self._clients.discard(conn)
+                print(f"[ws] client removed (n={len(self._clients)})",
+                      file=sys.stderr, flush=True)
 
         async def periodic():
             while not self._stopped.is_set():
@@ -231,7 +241,9 @@ class FrameBroadcaster:
                 for c in list(self._clients):
                     try:
                         await c.send(payload)
-                    except Exception:
+                    except Exception as e:
+                        print(f"[ws] send failed: {e!r}",
+                              file=sys.stderr, flush=True)
                         dead.append(c)
                 for d in dead:
                     self._clients.discard(d)
