@@ -18,6 +18,7 @@ export type Status = {
   events_path: string;
   snapshots_dir: string;
   log_lines: LogLine[];
+  ws_token: string | null;
 };
 
 export type AlertItem = { name: string; path: string };

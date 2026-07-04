@@ -76,10 +76,16 @@ class FrameBroadcaster:
     sequence number advances, so a frozen camera does not push the
     same JPEG at 10 Hz and defeat the Tauri UI's staleness detector
     (audit finding #20).
+
+    Audit #3: clients must present the configured token in the URL
+    query string (?token=...) or as the first message. Connections
+    presenting a browser Origin header are rejected (browsers can't
+    sneak in through a local web page).
     """
 
-    def __init__(self, port: int = 9876) -> None:
+    def __init__(self, port: int = 9876, token: str = "") -> None:
         self.port = port
+        self.token = token
         self._latest: tuple[bytes, int, int, int] | None = None  # (jpeg, w, h, seq)
         self._lock = threading.Lock()
         self._last_broadcast_seq: int = -1
@@ -113,13 +119,45 @@ class FrameBroadcaster:
     async def _serve(self) -> None:
         self._loop = asyncio.get_running_loop()
         from websockets.asyncio.server import serve
+        from urllib.parse import parse_qs
+
         async def handler(conn):
+            # audit #3: handshake checks
+            # 1. URL must carry ?token=<expected> OR the first message
+            #    must equal the token (for clients that can't set query)
+            # 2. Browser Origin header is rejected outright — web pages
+            #    can open cross-origin WS to 127.0.0.1; they cannot
+            #    suppress the Origin header.
+            from websockets.http11 import Headers
+            request = conn.request
+            origin = request.headers.get("Origin")
+            if origin:
+                # Web browsers always send Origin. Local CLI clients
+                # (the Tauri webview, our own ws client) don't.
+                await conn.close(code=1008, reason="origin not allowed")
+                return
+
+            qs = parse_qs(request.path.split("?", 1)[1] if "?" in request.path else "")
+            presented = (qs.get("token", [None])[0] or "").strip()
+            if self.token and presented != self.token:
+                # Allow the client to present the token as the first
+                # message instead of in the URL.
+                try:
+                    first = await asyncio.wait_for(conn.recv(), timeout=2.0)
+                except Exception:
+                    first = None
+                if not (isinstance(first, (str, bytes))
+                        and self._extract_token(first) == self.token):
+                    await conn.close(code=1008, reason="bad or missing token")
+                    return
+
             self._clients.add(conn)
             try:
                 async for _ in conn:
                     pass
             finally:
                 self._clients.discard(conn)
+
         async def periodic():
             while not self._stopped.is_set():
                 await asyncio.sleep(0.1)
@@ -146,12 +184,24 @@ class FrameBroadcaster:
                 for d in dead:
                     self._clients.discard(d)
         server = await serve(handler, "127.0.0.1", self.port)
-        print(f"[ws] frame broadcaster listening on ws://127.0.0.1:{self.port}", flush=True)
+        print(f"[ws] frame broadcaster listening on ws://127.0.0.1:{self.port} (token-gated)", flush=True)
         try:
             await asyncio.gather(server.wait_closed(), periodic())
         except asyncio.CancelledError:
             pass
         server.close()
+
+    @staticmethod
+    def _extract_token(msg) -> str:
+        s = msg.decode() if isinstance(msg, (bytes, bytearray)) else msg
+        s = s.strip()
+        if s.startswith("{"):
+            import json
+            try:
+                return str(json.loads(s).get("token", ""))
+            except Exception:
+                return ""
+        return s
 
 
 class DetectiveWorker(threading.Thread):
@@ -317,6 +367,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                         help="skip cv2.imshow (use when embedded in Tauri)")
     parser.add_argument("--ws-port", type=int, default=9876,
                         help="WebSocket port for live preview frame stream (Tauri)")
+    parser.add_argument("--ws-token", type=str, default="",
+                        help="audit #3: required token in WS URL (?token=...) "
+                             "to gate the live-feed socket against local attackers.")
     args = parser.parse_args(argv)
 
     if args.list_cameras:
@@ -372,7 +425,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     worker = DetectiveWorker(detective, escalator, channels, log, cfg, frame_provider=None)
     worker.start()
 
-    broadcaster = FrameBroadcaster(port=args.ws_port)
+    broadcaster = FrameBroadcaster(port=args.ws_port, token=args.ws_token)
     broadcaster.start()
 
     hud = HudState()

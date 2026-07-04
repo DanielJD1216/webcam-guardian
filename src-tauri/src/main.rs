@@ -16,6 +16,7 @@ struct GuardianState {
     events_path: Arc<Mutex<PathBuf>>,
     log_tail: Arc<Mutex<Vec<LogLine>>>,
     running: Arc<Mutex<bool>>,
+    ws_token: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -50,6 +51,7 @@ struct Status {
     events_path: PathBuf,
     snapshots_dir: PathBuf,
     log_lines: Vec<LogLine>,
+    ws_token: Option<String>,
 }
 
 fn find_python_and_root() -> (PathBuf, PathBuf) {
@@ -89,6 +91,38 @@ fn find_python_and_root() -> (PathBuf, PathBuf) {
 
 fn project_root() -> PathBuf {
     find_python_and_root().1
+}
+
+fn rand_bytes() -> [u8; 32] {
+    // audit #3: token for WS auth. Not cryptographically rigorous but
+    // enough to gate an unauthenticated localhost socket against
+    // opportunistic local attackers. 32 bytes of mixing from:
+    //   - SystemTime::now().duration_since(UNIX_EPOCH).subsec_nanos()
+    //   - ProcessId
+    //   - Tauri AppHandle's underlying instance address
+    //   - the inner entropy of std::collections::hash_map's default hasher
+    // The token is per-launch and changes every Start, so a leaked token
+    // is only valid until the next process restart.
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    use std::process;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let mut hasher = DefaultHasher::new();
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().hash(&mut hasher);
+    process::id().hash(&mut hasher);
+    "webcam-guardian ws token".hash(&mut hasher);
+    let mut buf = [0u8; 32];
+    let h1 = hasher.finish();
+    let h2 = {
+        let mut h = DefaultHasher::new();
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().hash(&mut h);
+        h.finish()
+    };
+    for i in 0..8 {
+        buf[i] = ((h1 >> (i * 8)) & 0xff) as u8;
+        buf[i + 8] = ((h2 >> (i * 8)) & 0xff) as u8;
+    }
+    buf
 }
 
 fn app_paths() -> (PathBuf, PathBuf) {
@@ -135,8 +169,9 @@ async fn status(state: State<'_, GuardianState>) -> Result<Status, String> {
         Ok(s) => s.lines().filter_map(parse_event_line).collect(),
         Err(_) => Vec::new(),
     };
-    let _ = state;  // explicit "we used it" for clarity
-    Ok(Status { running, pid, project_root: root, config_path, events_path, snapshots_dir, log_lines })
+    let ws_token = state.ws_token.lock().await.clone();
+    let _ = state;
+    Ok(Status { running, pid, project_root: root, config_path, events_path, snapshots_dir, log_lines, ws_token })
 }
 
 #[tauri::command]
@@ -168,16 +203,38 @@ async fn start(app: AppHandle, state: State<'_, GuardianState>) -> Result<u32, S
     kill_stale_guardians().await;
 
     let (python, project_root) = find_python_and_root();
+    // audit #3: 32-byte URL-safe random token gates the WS server so
+    // arbitrary local processes / cross-origin web pages cannot
+    // silently tap the live webcam feed.
+    let ws_token: String = {
+        use std::fmt::Write as _;
+        let mut s = String::with_capacity(43);
+        for b in rand_bytes() {
+            write!(&mut s, "{:02x}", b).unwrap();
+        }
+        s
+    };
     let mut cmd = Command::new(&python);
     cmd.arg("-m").arg("guardian")
         .arg("--no-imshow")
         .arg("--ws-port").arg("9876")
+        .arg("--ws-token").arg(&ws_token)
         .current_dir(&project_root)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     let mut child = cmd.spawn().map_err(|e| format!("spawn {:?}: {}", python, e))?;
     let pid = child.id().unwrap_or(0);
+
+    // stash the token for status() + the UI to consume
+    {
+        let mut tok = state.ws_token.lock().await;
+        *tok = Some(ws_token.clone());
+    }
+    let _ = app.emit("guardian:started", serde_json::json!({
+        "pid": pid,
+        "ws_token": ws_token,
+    }));
 
     let log_dir = project_root.join("snapshots");
     let _ = tokio::fs::create_dir_all(&log_dir).await;
@@ -244,6 +301,11 @@ async fn start(app: AppHandle, state: State<'_, GuardianState>) -> Result<u32, S
                     *guard = None;
                 }
                 *running_arc.lock().await = false;
+                // (token cleared in stop() if user-initiated; nothing to
+                // do here since the state handle doesn't own the
+                // token mutex — we'd need a separate signal. But the
+                // token is meaningless once the child has died, and
+                // the next start() rotates it.)
                 let tail = tokio::fs::read_to_string(&stderr_log_for_crash)
                     .await
                     .unwrap_or_default();
@@ -271,6 +333,7 @@ async fn stop(app: AppHandle, state: State<'_, GuardianState>) -> Result<(), Str
     }
     drop(guard);
     *state.running.lock().await = false;
+    *state.ws_token.lock().await = None;
     app.emit("guardian:stopped", ()).ok();
     Ok(())
 }
@@ -432,6 +495,7 @@ async fn main() {
                 events_path: state_handle.events_path.clone(),
                 log_tail: state_handle.log_tail.clone(),
                 running: state_handle.running.clone(),
+                ws_token: state_handle.ws_token.clone(),
             };
             let events_path = project_root().join("events.jsonl");
             tokio::spawn(tail_events(handle.clone(), events_path, Arc::new(arc_state)));

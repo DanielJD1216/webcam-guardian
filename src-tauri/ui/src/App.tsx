@@ -61,6 +61,7 @@ export default function App() {
   const lastFrameAt = useRef<number>(0);
   const lastPreviewUrl = useRef<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const wsTokenRef = useRef<string | null>(null);   // audit #3: per-launch token
 
   // ----- status & log streaming -----
   useEffect(() => {
@@ -80,7 +81,14 @@ export default function App() {
     };
     refresh();
     const interval = setInterval(refresh, 3000);
-    tauri.onStarted((p) => { setRunning(true); setPid(p); setFooterMsg(`guardian started · pid ${p}`); });
+    tauri.onStarted((p) => {
+      // audit #3: the payload is now { pid, ws_token } not just pid.
+      const info = (typeof p === "object" && p) ? p : { pid: p, ws_token: null };
+      setRunning(true);
+      setPid(info.pid ?? null);
+      wsTokenRef.current = info.ws_token ?? null;
+      setFooterMsg(`guardian started · pid ${info.pid ?? "?"}`);
+    });
     tauri.onStopped(() => { setRunning(false); setPid(null); setFooterMsg("guardian stopped"); });
     tauri.onCrashed((info) => {
       setRunning(false);
@@ -102,7 +110,12 @@ export default function App() {
       }
       try {
         setPreviewState("connecting");
-        const ws = new WebSocket("ws://127.0.0.1:9876");
+        // audit #3: include the per-launch token in the URL. The
+        // Python WS server rejects connections without it (and
+        // browsers that always send an Origin header).
+        const tok = wsTokenRef.current;
+        const url = tok ? `ws://127.0.0.1:9876/?token=${encodeURIComponent(tok)}` : "ws://127.0.0.1:9876";
+        const ws = new WebSocket(url);
         wsRef.current = ws;
         ws.binaryType = "arraybuffer";
         ws.onopen = () => setPreviewState("live");
