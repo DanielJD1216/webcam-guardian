@@ -219,7 +219,7 @@ def load(path: str | Path = "config.yaml") -> Config:
     global _CONFIG_PATH
     _CONFIG_PATH = Path(path).resolve()
     raw = _load_yaml(_CONFIG_PATH)
-    return Config(
+    cfg = Config(
         camera=_camera(raw.get("camera") or {}),
         guard=_guard(raw.get("guard") or {}),
         escalation=_escalation(raw.get("escalation") or {}),
@@ -228,6 +228,75 @@ def load(path: str | Path = "config.yaml") -> Config:
         log=_log(raw.get("log") or {}),
         raw=raw,
     )
+    # audit #56: warn on unknown keys per section, and validate
+    # cross-field constraint trigger_classes/draw_classes are subsets
+    # of coco_ids. Without this, a typo like `trigger_clases:` would
+    # silently fall back to defaults — the user thinks they tightened
+    # the config but didn't.
+    _validate_unknown_keys(raw)
+    _validate_trigger_classes(cfg)
+    return cfg
+
+
+# audit #56: explicit allow-list per section. Anything in the raw
+# YAML that doesn't match a known key is logged to stderr so a
+# misconfigured config is loud at boot, not silent.
+_KNOWN_KEYS: dict[str, set[str]] = {
+    "camera": {"index", "backend", "width", "height"},
+    "guard": {"backend", "device", "analyzed_fps", "conf_threshold",
+              "draw_min_streak", "draw_classes", "trigger_classes",
+              "coco_ids", "la_command", "la_input_long_side"},
+    "escalation": {"debounce_frames", "cooldown_seconds",
+                   "max_detective_calls_per_run", "max_alerts_per_hour"},
+    "detective": {"base_url", "model", "api_key_env", "extra_body",
+                  "timeout_seconds", "max_completion_tokens",
+                  "temperature", "image_long_side", "jpeg_quality",
+                  "image_detail", "use_tool_call", "scene_description"},
+    "alert": {"channels", "attach_snapshot", "telegram_chat_id",
+              "email", "ntfy_topic"},
+    "alert.email": {"smtp_host", "smtp_port", "from_addr", "to_addr",
+                    "api_key_env"},   # legacy; #57 marks some of
+                                      # these as dead but we keep
+                                      # accepting them
+    "log": {"events_path", "snapshots_dir", "save_escalation_frames"},
+}
+
+
+def _validate_unknown_keys(raw: dict) -> None:
+    for section, allowed in _KNOWN_KEYS.items():
+        if section not in raw:
+            continue
+        sub = raw[section]
+        if not isinstance(sub, dict):
+            continue
+        unknown = set(sub.keys()) - allowed
+        if unknown:
+            import sys
+            print(
+                f"[config] WARNING: section '{section}' has unknown "
+                f"key(s) {sorted(unknown)} (allowed: {sorted(allowed)}). "
+                f"They will be ignored — fix the typo or remove them.",
+                file=sys.stderr,
+            )
+
+
+# audit #56 follow-up: cross-field validation. The RT-DETR guard
+# only maps coco_ids.keys() to canonical labels; any string in
+# trigger_classes or draw_classes that isn't there can never be
+# detected. The user's instinct is "more trigger classes = more
+# coverage" but it's actually "no coverage at all if missing".
+def _validate_trigger_classes(cfg: Config) -> None:
+    coco_keys = set(cfg.guard.coco_ids.keys())
+    for label in cfg.guard.trigger_classes + cfg.guard.draw_classes:
+        if label not in coco_keys:
+            import sys
+            print(
+                f"[config] WARNING: trigger/draw class '{label}' is "
+                f"not a key of guard.coco_ids (have: {sorted(coco_keys)}). "
+                f"It will never be detected — add a mapping or remove "
+                f"the label.",
+                file=sys.stderr,
+            )
 
 
 def resolve_device(requested: str) -> str:

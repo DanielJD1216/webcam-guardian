@@ -20,6 +20,9 @@ def _make(name: str, cfg: AlertCfg) -> AlertChannel | None:
     env var (e.g. TELEGRAM_BOT_TOKEN unset) aborted the whole
     list, silently disabling every other channel too. Now each
     channel is built independently and errors are logged.
+    Audit #57: ResendChannel was always given the hard-coded env
+    var name "RESEND_API_KEY" even when config.yaml specified
+    alert.email.api_key_env — that knob was dead. Pass it through.
     """
     try:
         if name == "telegram":
@@ -28,6 +31,7 @@ def _make(name: str, cfg: AlertCfg) -> AlertChannel | None:
             return ResendChannel(
                 from_addr=cfg.email.from_addr,
                 to_addr=cfg.email.to_addr,
+                api_key_env=cfg.email.api_key_env,
             )
         if name == "desktop":
             return DesktopChannel()
