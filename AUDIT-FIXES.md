@@ -105,13 +105,30 @@ Done in Wave 3:
 - [x] #33 + #34 — Accessibility. :focus-visible outline; status-pill
         colors meet WCAG AA contrast.
 
-## Wave 6 (planned)
+## Wave 6 (done)
 
-- #36 — Test coverage gaps
+- [x] #36 — Real test coverage. Refactored detective.py parse
+        block to a pure `parse_decision(msg)` function and rewrote
+        test_parsing.py to actually call it. Fixed the duplicate
+        test name that was silently shadowing a real test. 7 new
+        tests cover: valid tool-call parse, invalid JSON, valid
+        prompt-JSON, garbage in (trap #13), real `<think>` tags with
+        'think' inside the JSON body, encode_frame downsize, and
+        encode_frame no-upsize. **17 tests pass** (was 15 with a
+        silent duplicate).
+- [x] #29 follow-up — Alert-replay gallery is grouped by date
+        (Today / Yesterday / "<Mon> <Day>") via groupAlertsByDate().
+- [x] #65 — Detective prompt: appended a guideline that explicitly
+        forbids describing protected attributes (race, ethnicity,
+        gender, age, religion, disability) in alert messages.
+- [x] #50 residual — log-tail live status pill uses the right
+        value (the previous pill color revision in Wave 5 also fixed
+        this — text color was being inherited instead of set per
+        state).
+
+## Wave 7 (planned)
+
 - #56 — JSON Schema for config.yaml
-- #50 residual — log-tail live status pill uses the right value
-- #29 follow-up — Date-grouping of alert gallery
-- #65 — Detective prompt: no protected-attribute output
 - #66 — GDPR face-blur in stored snapshots
 - #54 — JSONL format robustness
 - #52 — useEffect cleanup audit
