@@ -159,15 +159,18 @@ export default function App() {
     }
   };
   useEffect(() => {
-    // audit #27: load config + cameras on mount. If config is
+    // audit #27 + #28: load config + cameras on mount. If config is
     // missing or empty, auto-create from the example so the pickers
-    // and editor are populated.
+    // and editor are populated. The Reset button then sees "Reset to
+    // defaults" copy (destructive confirm) rather than the bare
+    // "Create config" path.
     (async () => {
       try {
         let c = await tauri.readConfig();
-        if (!c || c.trim() === "") {
+        const isFresh = !c || c.trim() === "";
+        if (isFresh) {
           c = await tauri.resetConfigFromExample();
-          setFooterMsg(`config auto-created from example (${c.length} chars)`);
+          setFooterMsg(`first-run: config.yaml auto-created from example (${c.length} chars). Review and edit, then Start.`);
         }
         setCurrentConfig(c);
         setConfigDraft(c);
@@ -222,8 +225,17 @@ export default function App() {
   };
 
   const resetConfig = async () => {
-    const ok = window.confirm("Reset config.yaml to defaults from config.example.yaml? Your current config will be overwritten.");
-    if (!ok) return;
+    // audit #28: button label + copy adapt to whether config exists
+    // already. If it does, "Reset to defaults" with a destructive
+    // confirm; if not, "Create config" with no confirm at all.
+    const isFresh = !currentConfig.trim();
+    const label = isFresh ? "Create config.yaml" : "Reset to defaults";
+    if (!isFresh) {
+      const ok = window.confirm(
+        "Reset config.yaml to defaults from config.example.yaml? " +
+        "Your current config will be overwritten.");
+      if (!ok) return;
+    }
     try {
       const fresh = await tauri.resetConfigFromExample();
       setCurrentConfig(fresh);
@@ -281,12 +293,31 @@ export default function App() {
       const imgs = items.map((a) => ({
         name: a.name,
         url: tauri.assetUrl(a.path),
+        // audit #29: derive a human label from the alert's millisecond
+        // timestamp so the gallery isn't a wall of identical filenames.
+        when: alertLabelFromName(a.name),
       }));
       setAlertImgs(imgs);
     } catch (e) {
       console.error("listAlerts failed", e);
     }
   };
+
+  function alertLabelFromName(name: string): string {
+    // alert_<unix_ms>.jpg
+    const m = name.match(/^alert_(\d+)\.jpg$/);
+    if (!m) return name;
+    const t = new Date(parseInt(m[1], 10));
+    if (isNaN(t.getTime())) return name;
+    const now = new Date();
+    const sameDay = t.toDateString() === now.toDateString();
+    const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+    const isYesterday = t.toDateString() === yesterday.toDateString();
+    const time = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    if (sameDay) return `Today ${time}`;
+    if (isYesterday) return `Yesterday ${time}`;
+    return `${t.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
+  }
   useEffect(() => { refreshAlerts(); }, [logLines]);
   useEffect(() => { const i = setInterval(refreshAlerts, 5000); return () => clearInterval(i); }, []);
 
@@ -367,8 +398,16 @@ export default function App() {
               onChange={(e) => onCameraChange(parseInt(e.target.value, 10))}
               disabled={cameras.length === 0}
               className="rounded-md border border-line bg-elev px-3 py-1.5 text-sm text-text outline-none focus:border-cyan-dim min-w-[180px] max-w-[240px]"
+              title="Camera source (use the Rescan button if your iPhone isn't listed)"
             >
-              {cameras.length === 0 && <option value="">(scanning…)</option>}
+              {/* audit #30: distinct placeholder per real state */}
+              {cameraIdx === "scanning" && <option value="">(scanning…)</option>}
+              {cameraIdx === "none" && cameras.length === 0 && (
+                <option value="">(no cameras found — check permissions)</option>
+              )}
+              {cameraIdx === "failed" && (
+                <option value="">(scan failed — see status bar)</option>
+              )}
               {cameras.map((c) => (
                 <option key={c.index} value={String(c.index)} disabled={!c.opens}>
                   {c.label}{c.placeholder ? "  — placeholder?" : ""}
@@ -457,8 +496,15 @@ export default function App() {
                 className="min-h-[100px] flex-1 resize-y rounded-md border border-line bg-bg/60 p-2 font-mono text-xs leading-relaxed text-text outline-none focus:border-yellow/40"
               />
               <div className="mt-2 flex justify-end gap-2">
-                <MovingBorder onClick={resetConfig} variant="secondary" className="!px-3 !py-1 text-xs">
-                  Reset
+                <MovingBorder
+                  onClick={resetConfig}
+                  variant="secondary"
+                  className="!px-3 !py-1 text-xs"
+                >
+                  {/* audit #28: label adapts — 'Create config' for
+                      first run (no destructive confirm), 'Reset to
+                      defaults' for an existing user. */}
+                  {currentConfig.trim() ? "Reset to defaults" : "Create config"}
                 </MovingBorder>
                 <MovingBorder onClick={reloadConfig} variant="secondary" className="!px-3 !py-1 text-xs">
                   Reload
@@ -535,13 +581,17 @@ export default function App() {
                 ) : (
                   <div className="grid grid-cols-4 gap-1.5">
                     {alertImgs.map((a) => (
-                      <img
-                        key={a.name}
-                        src={a.url}
-                        title={a.name}
-                        className="aspect-video w-full rounded border border-line object-cover transition hover:border-cyan"
-                        loading="lazy"
-                      />
+                      <div key={a.name} className="relative">
+                        <img
+                          src={a.url}
+                          title={a.name}
+                          className="aspect-video w-full rounded border border-line object-cover transition hover:border-cyan"
+                          loading="lazy"
+                        />
+                        <div className="absolute bottom-0 left-0 right-0 truncate rounded-b bg-bg/80 px-1 py-0.5 text-center font-mono text-[9px] text-grey">
+                          {a.when ?? a.name}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 )}
