@@ -249,7 +249,10 @@ class DetectiveWorker(threading.Thread):
                 frame, labels, now = self.q.get(timeout=0.5)
             except queue.Empty:
                 continue
-            self.escalator.on_dispatch(labels, now=now)
+            # audit #5/#78: cooldown is now charged at submit time on the
+            # main thread (see main loop). The worker no longer mutates
+            # the escalator's per-class cooldowns — that would
+            # otherwise race with the main thread's observe() check.
             try:
                 res = self.detective.judge(frame, labels)
                 decision = res.decision
@@ -514,6 +517,15 @@ def main(argv: Optional[list[str]] = None) -> int:
 
                 should, labels, _remaining = escalator.observe(present, now)
                 if should:
+                    # audit #5/#78: charge the per-class cooldown HERE, at
+                    # submit time on the main thread. The worker's
+                    # on_dispatch() is now a no-op (a class invariant
+                    # documented in the worker). This prevents a slow
+                    # M3 call (or a worker stuck in judge()) from
+                    # leaving the cooldown uncharged, which let a
+                    # still-eligible label pass observe() and enqueue
+                    # a second copy while the first was still in flight.
+                    escalator.on_dispatch(labels, now=now)
                     if worker.submit(frame.copy(), sorted(labels), now):
                         set_banner(hud, f">>> DETECTIVE CALLED: {','.join(sorted(labels))}",
                                    seconds=2.0)
