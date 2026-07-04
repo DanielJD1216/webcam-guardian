@@ -141,12 +141,27 @@ Done in Wave 3:
         serialization so the JSONL line is always parseable JSON
         (no more silent drop in the Tauri log viewer).
 
-## Wave 8 (planned)
+## Wave 8 (done)
 
-- #66 — GDPR face-blur in stored snapshots
-- #52 — useEffect cleanup audit
+- [x] #52 — Tauri listeners unlistened. Collect the listen
+        Promises in an array and call them all in cleanup so React
+        StrictMode dev double-mount doesn't double-register.
+- [x] #51 — MovingBorder + Spotlight defaults fixed to current
+        palette tokens (#0b80d1 and rgba(11,128,209,0.18)
+        respectively) so the preview panel no longer glows in
+        retired-palette cyan.
+- [x] #66 follow-up — log.retention_days + prune_older_than()
+        startup sweep for GDPR/CCPA storage limitation. Snapshots
+        and events older than N days are deleted at boot. Malformed
+        lines are kept for forensics.
+
+## Wave 9 (planned)
+
+- #66 (full) — GDPR face-blur in stored snapshots
 - #53 — Tailwind opacity-modifier compat check
-- #51 — Tailwind palette drift check
+- #52 follow-up — refreshAlerts keyed on [logLines] (duplicate IPC)
+- #51 follow-up — rename `dim` token (dark-theme leftover)
+- #54 follow-up — `default=str` is a footgun (suggests review)
 
 ## Lower-priority
 
