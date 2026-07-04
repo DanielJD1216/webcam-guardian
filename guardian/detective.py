@@ -29,7 +29,7 @@ from openai import OpenAI
 from .config import DetectiveCfg
 
 
-THINK_RE = re.compile(r"think.*?think", re.DOTALL)
+THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
 ASSESSMENT_TOOL: dict[str, Any] = {
@@ -94,8 +94,27 @@ def load_system_prompt(cfg: DetectiveCfg, override_path: str | None) -> str:
     """Per BUILD-PLAN §15: judge.txt is the user-editable surface for house rules."""
     if override_path and os.path.exists(override_path):
         with open(override_path, "r", encoding="utf-8") as f:
-            return f.read()
+            return _format_prompt_safely(f.read(), scene=cfg.scene_description)
     return DEFAULT_SYSTEM_PROMPT
+
+
+def _format_prompt_safely(template: str, /, **kwargs) -> str:
+    """Substitute {key} placeholders without using str.format().
+
+    Review finding #71: str.format({scene}) on user-edited judge.txt
+    raises KeyError if the file contains any literal { or } that does
+    not match a kwarg — silently disabling every detective call.
+
+    Plain string substitution: any literal { or } in the template is
+    preserved unchanged. Only named placeholders we explicitly pass
+    are replaced. Values may not contain '{key}' substrings (the only
+    kwarg today is scene_description, a free-text field, so this is
+    acceptable; document the limitation).
+    """
+    out = template
+    for k, v in kwargs.items():
+        out = out.replace("{" + k + "}", str(v))
+    return out
 
 
 @dataclass
@@ -140,8 +159,8 @@ class Detective:
         kwargs: dict[str, Any] = dict(
             model=self.cfg.model,
             messages=[
-                {"role": "system", "content": self.system_prompt.format(
-                    scene=self.cfg.scene_description)},
+                {"role": "system", "content": _format_prompt_safely(
+                    self.system_prompt, scene=self.cfg.scene_description)},
                 {"role": "user", "content": user_content},
             ],
             max_completion_tokens=self.cfg.max_completion_tokens,
