@@ -53,6 +53,19 @@ def _ts() -> str:
 
 CAMERA_BACKEND_NAMES = {"auto", "dshow", "msmf", "avfoundation", "v4l2"}
 
+# audit #3 corrected: Tauri webview origin schemes. macOS WKWebView
+# reports `http://tauri.localhost`; Windows/Linux WebView report
+# `tauri://localhost`; some mobile/Android setups send `null`. A
+# real cross-origin web page would send something else and get
+# rejected. An empty Origin (some local CLI clients) is also allowed
+# since the token check below is the actual gate.
+_ALLOWED_WS_ORIGINS = frozenset({
+    "http://tauri.localhost",
+    "tauri://localhost",
+    "null",
+    "",
+})
+
 
 def _camera_backend(name: str):
     if name == "auto" or name not in CAMERA_BACKEND_NAMES:
@@ -130,33 +143,49 @@ class FrameBroadcaster:
         from urllib.parse import parse_qs
 
         async def handler(conn):
-            # audit #3: handshake checks
+            # audit #3: handshake checks (corrected)
+            #
             # 1. URL must carry ?token=<expected> OR the first message
-            #    must equal the token (for clients that can't set query)
-            # 2. Browser Origin header is rejected outright — web pages
-            #    can open cross-origin WS to 127.0.0.1; they cannot
-            #    suppress the Origin header.
-            from websockets.http11 import Headers
+            #    must equal the token (for clients that can't set query).
+            # 2. Origin header must be one of the Tauri webview schemes
+            #    (`http://tauri.localhost` on macOS, `tauri://localhost`
+            #    on Linux/Windows) or `null` (file:// scheme on some
+            #    mobile/Android setups). Reject any other Origin so a
+            #    cross-origin web page can't subscribe.
+            #
+            # Audit #3 originally rejected ALL Origins — that broke
+            # the Tauri webview, which IS a browser and ALWAYS sends
+            # an Origin header. The token is the actual security gate
+            # (random 32-byte per-launch secret); the Origin check is
+            # defense-in-depth, not the gate.
             request = conn.request
-            origin = request.headers.get("Origin")
-            if origin:
-                # Web browsers always send Origin. Local CLI clients
-                # (the Tauri webview, our own ws client) don't.
-                await conn.close(code=1008, reason="origin not allowed")
+            origin = (request.headers.get("Origin") or "").strip()
+            if origin not in _ALLOWED_WS_ORIGINS:
+                await conn.close(code=1008, reason=f"origin {origin!r} not allowed")
                 return
 
             qs = parse_qs(request.path.split("?", 1)[1] if "?" in request.path else "")
             presented = (qs.get("token", [None])[0] or "").strip()
-            if self.token and presented != self.token:
-                # Allow the client to present the token as the first
-                # message instead of in the URL.
-                try:
-                    first = await asyncio.wait_for(conn.recv(), timeout=2.0)
-                except Exception:
-                    first = None
-                if not (isinstance(first, (str, bytes))
-                        and self._extract_token(first) == self.token):
-                    await conn.close(code=1008, reason="bad or missing token")
+            if self.token:
+                if presented == self.token:
+                    pass  # URL-token match — proceed.
+                elif not presented:
+                    # No token in URL; allow the client to present the
+                    # token as the first message instead (for clients
+                    # that can't set query). Bounded 2 s wait.
+                    try:
+                        first = await asyncio.wait_for(conn.recv(), timeout=2.0)
+                    except Exception:
+                        first = None
+                    if not (isinstance(first, (str, bytes))
+                            and self._extract_token(first) == self.token):
+                        await conn.close(code=1008, reason="bad or missing token")
+                        return
+                else:
+                    # Wrong token presented in URL — reject immediately.
+                    # Don't burn 2 s on the wait_for fallback: presenting
+                    # a wrong token is a hard fail, not a soft one.
+                    await conn.close(code=1008, reason="bad token")
                     return
 
             self._clients.add(conn)
