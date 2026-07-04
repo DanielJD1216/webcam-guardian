@@ -94,18 +94,23 @@ Done in Wave 3:
         on recovery. Doesn't burn the hourly alert cap. Closes the
         "system silently goes blind" silent safety failure.
 
-## Wave 5 (planned)
+## Wave 5 (done)
 
-- #75 — Watchdog per-start accumulation guard
-- #77 — WebSocket auto-reconnect after network sleep (partially
-        done — reconnect loop exists, but no exponential backoff
-        and no cancellation on Stop)
+- [x] #75 — Watchdog per-start accumulation guard. Generation
+        counter in GuardianState; leaked watchdogs self-terminate
+        within 2 s of a new start.
+- [x] #77 — WebSocket reconnect chain. Effect declares a
+        `cancelled` flag + `retryTimer` handle; cleanup cancels
+        the chain. Exponential backoff capped at 8 s.
+- [x] #33 + #34 — Accessibility. :focus-visible outline; status-pill
+        colors meet WCAG AA contrast.
+
+## Wave 6 (planned)
+
 - #36 — Test coverage gaps
 - #56 — JSON Schema for config.yaml
 - #50 residual — log-tail live status pill uses the right value
 - #29 follow-up — Date-grouping of alert gallery
-- #34 — Color contrast (WCAG)
-- #33 — Keyboard navigation
 - #65 — Detective prompt: no protected-attribute output
 - #66 — GDPR face-blur in stored snapshots
 - #54 — JSONL format robustness
