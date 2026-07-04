@@ -28,3 +28,18 @@ html, body, #root {
 
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; }
+
+/* audit #33: keyboard focus visibility. Tailwind base already gives
+   elements a default focus-visible ring; we strengthen it on
+   interactive controls (buttons, selects, textareas) so it's
+   obvious in the light theme. */
+:focus-visible {
+  outline: 2px solid #0b80d1;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+/* audit #34: stronger contrast for the accent state-pill colors so
+   they meet WCAG AA against the panel background. */
+.pill-stopped { color: #b82828; }
+.pill-running { color: #15704a; }
+.pill-error   { color: #a05a00; }

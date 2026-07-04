@@ -65,6 +65,7 @@ export default function App() {
   const lastPreviewUrl = useRef<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const wsTokenRef = useRef<string | null>(null);   // audit #3: per-launch token
+  const retryCountRef = useRef(0);                  // audit #77: backoff state for WS reconnect
 
   // ----- status & log streaming -----
   useEffect(() => {
@@ -108,8 +109,13 @@ export default function App() {
 
   // ----- live preview websocket -----
   useEffect(() => {
+    // audit #77: closure-scoped cancellation flag + retry timer handle
+    // so the effect cleanup can actually stop the reconnect chain
+    // (cancelled flag) and clear the next pending retry (retryTimer).
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
     function connect() {
-      if (!running) {
+      if (cancelled || !running) {
         setPreviewState("off");
         return;
       }
@@ -139,16 +145,30 @@ export default function App() {
           setPreviewState("live");
         };
         ws.onclose = () => {
+          if (cancelled) return;
           setPreviewState("disconnected");
-          setTimeout(connect, 1500);
+          // audit #77: exponential backoff capped at 8 s so a
+          // perpetually dead port doesn't hammer it. Cancellable via
+          // the effect-scope `cancelled` flag and `retryTimer` handle
+          // (without those, onclose + setTimeout chain survives the
+          // effect cleanup and keeps retrying the dead port after
+          // Stop).
+          const backoff = Math.min(8000, 1500 * Math.pow(1.4, retryCountRef.current));
+          retryCountRef.current += 1;
+          retryTimer = setTimeout(connect, backoff);
         };
-        ws.onerror = () => ws.close();
+        ws.onerror = () => { try { ws.close(); } catch { /* already closing */ } };
       } catch {
         setPreviewState("disconnected");
       }
     }
+    retryCountRef.current = 0;
     connect();
-    return () => wsRef.current?.close();
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      try { wsRef.current?.close(); } catch { /* noop */ }
+    };
   }, [running]);
 
   // ----- cameras -----

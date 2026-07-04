@@ -16,6 +16,11 @@ struct GuardianState {
     log_tail: Arc<Mutex<Vec<LogLine>>>,
     running: Arc<Mutex<bool>>,
     ws_token: Arc<Mutex<Option<String>>>,
+    generation: Arc<Mutex<u64>>,    // audit #75: bumped on every
+                                   // start() / stop(); a watchdog that
+                                   // sees a generation different from
+                                   // the one it captured breaks instead
+                                   // of polling forever.
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -330,15 +335,28 @@ async fn start(app: AppHandle, state: State<'_, GuardianState>) -> Result<u32, S
     }
 
     *state.running.lock().await = true;
+    // audit #75: bump the watchdog generation on every start so a
+    // leaked watchdog (from a previous run whose state.child was
+    // taken by guard.take() in stop()) sees a mismatch and breaks
+    // out of its 2 s polling loop instead of running forever.
+    *state.generation.lock().await += 1;
     app.emit("guardian:started", pid).ok();
 
     let child_arc = state.child.clone();
     let running_arc = state.running.clone();
+    let generation_arc = state.generation.clone();
     let stderr_log_for_crash = stderr_log.clone();
     let app_handle = app.clone();
+    let my_generation = *generation_arc.lock().await;
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(2)).await;
+            // audit #75: a leaked watchdog sees a generation mismatch
+            // when start() bumps it for a new run. Break instead of
+            // polling a Child slot whose contents have moved on.
+            if *generation_arc.lock().await != my_generation {
+                break;
+            }
             let exit_status = {
                 let mut guard = child_arc.lock().await;
                 guard.as_mut().and_then(|c| c.try_wait().ok().flatten())
@@ -640,6 +658,7 @@ async fn main() {
                 log_tail: state_handle.log_tail.clone(),
                 running: state_handle.running.clone(),
                 ws_token: state_handle.ws_token.clone(),
+                generation: state_handle.generation.clone(),
             };
             let events_path = project_root().join("events.jsonl");
             tokio::spawn(tail_events(handle.clone(), events_path, Arc::new(arc_state)));
