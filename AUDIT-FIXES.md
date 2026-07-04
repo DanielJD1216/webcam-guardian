@@ -199,6 +199,25 @@ Done in Wave 3:
         1 but was masked in production because `main()` exits the
         process before any daemon thread's join lifecycle matters.
         Fix in `guardian/main.py`: rename to `_stop_event`.
+- [x] **#a80 (new — caught by Tauri runtime)** — Audit #3's WS
+        handler rejected ALL `Origin` headers, but the Tauri webview
+        (WKWebView on macOS, WebView2 on Windows, WebKitGTK on Linux)
+        IS a browser and ALWAYS sends one. Result: the live-preview
+        pane stayed at "Disconnected. Restarting..." forever in
+        Tauri mode. Fix: whitelist Tauri-internal origins
+        (`http://tauri.localhost`, `tauri://localhost`, `null`,
+        empty) instead of blanket-rejecting. The token check remains
+        the actual security gate; the Origin check is defense-in-
+        depth. 6 new tests in `tests/test_ws_origin.py` cover
+        accept + reject paths.
+- [x] **#a81 (new — follow-on from a80)** — When the URL had a
+        *wrong* token, the handler still entered the 2-second
+        `wait_for(conn.recv())` fallback before rejecting. That's a
+        2-second window in which a wrong-token attacker could read
+        frames. Fix: when the URL has a token at all and it doesn't
+        match, reject immediately. The 2-second wait_for now runs
+        only when no URL token was presented (clients that can only
+        send the token as the first message).
 
 ## Wave 11 (planned)
 
