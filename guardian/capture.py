@@ -85,6 +85,12 @@ class LatestFrameCamera:
         with self._lock:
             return self._seq
 
+    def last_ok_monotonic(self) -> float:
+        """audit #62: monotonic time of the last successful
+        cap.read() — main loop uses this to detect a camera stall."""
+        with self._lock:
+            return self._capture_time
+
     def release(self) -> None:
         self._stopped = True
         # Audit #1 low: don't release cap while reader may be inside read().

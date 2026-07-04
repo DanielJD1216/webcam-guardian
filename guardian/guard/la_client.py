@@ -79,8 +79,13 @@ class LocateAnythingGuard(GuardBackend):
     def submit_frame(self, frame_bgr) -> None:
         """Asynchronous handoff: render a JPEG, hand to the subprocess, parse later."""
         small = _resize_long_side(frame_bgr, self.cfg.la_input_long_side)
+        # audit #58: GuardCfg has no jpeg_quality (it lives on
+        # DetectiveCfg). Hard-code 80 — same as detective default; this
+        # is just the JPEG quality for the encoded handoff to the
+        # external LocateAnything subprocess.
+        jpeg_quality = 80
         ok, buf = cv2.imencode(".jpg", small, [int(cv2.IMWRITE_JPEG_QUALITY),
-                                                self.cfg.jpeg_quality])
+                                                jpeg_quality])
         if not ok:
             return
         threading.Thread(target=self._exchange, args=(buf.tobytes(),),

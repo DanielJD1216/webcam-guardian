@@ -145,10 +145,18 @@ class Detective:
 
     def judge(self, frame_bgr, guard_labels: list[str]) -> JudgeResult:
         b64 = encode_frame(frame_bgr, self.cfg.image_long_side, self.cfg.jpeg_quality)
+        # audit #73: include timezone name so the model knows whether
+        # the local clock is home-TZ (user lives here) or away-TZ
+        # (user is traveling). strftime alone is ambiguous; the model
+        # can otherwise mis-attribute "22:00 on a Tuesday" to a Tuesday
+        # that was actually yesterday in the user's mind.
+        from datetime import datetime
+        now = datetime.now().astimezone()
+        local_when = now.strftime("%A %H:%M %Z")
         user_content = [
             {"type": "text",
              "text": (f"Camera frame from {self.cfg.scene_description}. "
-                      f"Local time: {time.strftime('%A %H:%M')}. "
+                      f"Local time: {local_when}. "
                       f"Local detector flagged: {', '.join(guard_labels) or 'nothing'}.")},
             {"type": "image_url", "image_url": {
                 "url": f"data:image/jpeg;base64,{b64}",

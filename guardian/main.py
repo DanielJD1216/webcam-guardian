@@ -257,6 +257,25 @@ class DetectiveWorker(threading.Thread):
                 res = self.detective.judge(frame, labels)
                 decision = res.decision
                 decision.setdefault("latency_s", res.latency_s)
+                # audit #58: log.save_escalation_frames now controls
+                # whether every escalated frame is persisted to disk
+                # (independent of whether it becomes an alert). The
+                # 'attach_snapshot' config below decides whether the
+                # most-recently-saved frame is included in the alert
+                # delivery. The two are no longer conflated.
+                escalation_id = f"escalation_{int(time.time()*1000):013d}"
+                if self.cfg.log.save_escalation_frames:
+                    try:
+                        snapshot_save(
+                            frame, self.cfg.log.snapshots_dir,
+                            f"{escalation_id}.jpg",
+                        )
+                    except Exception as e:
+                        self.log.log({
+                            "type": "snapshot_save_error",
+                            "id": escalation_id,
+                            "error": _sanitize_error(repr(e)),
+                        })
                 if decision.get("alert"):
                     if not self.escalator.on_alert(time.monotonic()):
                         self.log.log({
@@ -266,21 +285,38 @@ class DetectiveWorker(threading.Thread):
                         continue
                     alert_id = f"alert_{int(time.time()*1000):013d}"
                     snap = None
-                    if self.cfg.alert.attach_snapshot and self.cfg.log.save_escalation_frames:
-                        try:
-                            snap = snapshot_save(frame, self.cfg.log.snapshots_dir,
-                                                  f"{alert_id}.jpg")
-                        except Exception as e:
-                            # audit #17: snapshot failure must NOT drop the
-                            # alert. Log it and continue without a frame.
-                            self.log.log({"type": "snapshot_save_error",
-                                          "alert_id": alert_id,
-                                          "error": _sanitize_error(repr(e))})
+                    if self.cfg.alert.attach_snapshot:
+                        # Reuse the escalation snapshot (above) if
+                        # available — same frame, alert_id-prefixed
+                        # name keeps the alert gallery organized. If
+                        # save_escalation_frames is off, save fresh.
+                        if self.cfg.log.save_escalation_frames:
+                            snap = self.cfg.log.snapshots_dir / f"{escalation_id}.jpg"
+                        else:
+                            try:
+                                snap = snapshot_save(
+                                    frame, self.cfg.log.snapshots_dir,
+                                    f"{alert_id}.jpg",
+                                )
+                            except Exception as e:
+                                # audit #17: snapshot failure must
+                                # NOT drop the alert.
+                                self.log.log({"type": "snapshot_save_error",
+                                              "alert_id": alert_id,
+                                              "error": _sanitize_error(repr(e))})
                     category = decision.get("category", "alert")
-                    title = f"Webcam Guardian · {category}"
+                    # audit #74: include the local TZ in the alert
+                    # body so a user reviewing alerts in Telegram
+                    # after travel knows whether "2:00" was home-TZ
+                    # or away-TZ. The model gives a relative
+                    # description; the absolute timestamp is ours.
+                    from datetime import datetime
+                    local_tz = datetime.now().astimezone().strftime("%Z")
+                    title = f"Webcam Guardian · {category} ({local_tz})"
                     message = (decision.get("message") or "").strip()
                     reason = (decision.get("reason") or "").strip()
                     body = message or reason or f"{category} detected"
+                    body = f"{body}  ·  {_ts().replace('+00:00', ' UTC')}"
                     # audit #61: only credit the hourly alert cap if
                     # at least one channel delivered (or we retried
                     # the transient network and all failed). The
@@ -477,6 +513,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     t_start = time.monotonic()
     last_frame_seq = 0             # audit #1: detect camera stall via seq
     last_stall_log_ts = 0.0        # throttle camera_stalled events to 1 / 5s
+    camera_lost_at = 0.0          # audit #62: time we first noticed no new frames
+    camera_lost_alerted = False   # whether the one-shot "camera offline" alert has fired
 
     try:
         while True:
@@ -493,7 +531,35 @@ def main(argv: Optional[list[str]] = None) -> int:
             # audit #1: if the camera isn't producing fresh frames,
             # log a stall event (throttled to once per 5 s). Without
             # this the guardian happily re-analyzes a frozen frame.
+            # audit #62: after ~5 s of no new frames, also dispatch
+            # an infra alert (bypassing the detective) so the user
+            # is told the system is blind. When frames resume, fire a
+            # "camera restored" alert and reset the flag.
             if seq == last_frame_seq and now - t_start > 1.0:
+                if camera_lost_at == 0.0:
+                    camera_lost_at = now
+                since = now - (cap_t or camera_lost_at)
+                if since > 5.0 and not camera_lost_alerted:
+                    camera_lost_alerted = True
+                    self.log.log({
+                        "type": "camera_lost",
+                        "since_s": round(since, 1),
+                        "ts": _ts(),
+                    })
+                    from datetime import datetime
+                    offline_msg = (
+                        f"Camera signal lost at "
+                        f"{datetime.now().astimezone().strftime('%H:%M %Z')}. "
+                        f"Last frame {round(since)}s ago. "
+                        f"Monitoring is paused until the camera reconnects."
+                    )
+                    dispatch_alerts(
+                        self.channels,
+                        f"camera_offline_{int(now*1000):013d}",
+                        "Webcam Guardian · camera_offline",
+                        offline_msg,
+                        None, self.log,
+                    )
                 if now - last_stall_log_ts > 5.0:
                     log.log({
                         "type": "camera_stalled",
@@ -504,6 +570,22 @@ def main(argv: Optional[list[str]] = None) -> int:
                     last_stall_log_ts = now
             else:
                 last_frame_seq = seq
+                if camera_lost_alerted:
+                    from datetime import datetime
+                    recovered_at = datetime.now().astimezone().strftime('%H:%M %Z')
+                    self.log.log({
+                        "type": "camera_restored",
+                        "ts": _ts(),
+                    })
+                    dispatch_alerts(
+                        self.channels,
+                        f"camera_restored_{int(now*1000):013d}",
+                        "Webcam Guardian · camera_restored",
+                        f"Camera signal recovered at {recovered_at}.",
+                        None, self.log,
+                    )
+                    camera_lost_at = 0.0
+                    camera_lost_alerted = False
 
             interval = 1.0 / max(1, cfg.guard.analyzed_fps)
             if now - last_analysis >= interval:
