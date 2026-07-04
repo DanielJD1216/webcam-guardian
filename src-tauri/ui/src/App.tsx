@@ -25,9 +25,11 @@ const RESOLUTIONS: { w: number; h: number; label: string }[] = [
   { w: 1920, h: 1080, label: "1920 × 1080 (best)" },
 ];
 
-function escapeHtml(s: string) {
-  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
-}
+// audit #50: React text children are auto-escaped. The
+// surrounding <span> wraps a JSON string. Calling escapeHtml on
+// top of that double-escapes entities (so we were rendering
+// {&quot;label&quot;:&quot;person&quot;} as text). Just JSON.stringify
+// and let React handle it.
 
 function parseConfigResolution(cfg: string): { w: number; h: number } | null {
   const wm = cfg.match(/^\s*width:\s*(\d+)/m);
@@ -45,7 +47,8 @@ export default function App() {
   const [running, setRunning] = useState(false);
   const [pid, setPid] = useState<number | null>(null);
   const [configPath, setConfigPath] = useState("");
-  const [projectRoot, setProjectRoot] = useState("");
+  const [, setProjectRoot] = useState("");   // audit #50: kept as unused-arg-only state to satisfy the autoCreate path below; remove once tsconfig noUnusedParameters is off.
+  void setProjectRoot;
   const [footerMsg, setFooterMsg] = useState("ready");
   const [cameraIdx, setCameraIdx] = useState<number | "scanning" | "none" | "failed">("scanning");
   const [cameras, setCameras] = useState<CameraOption[]>([]);
@@ -54,7 +57,7 @@ export default function App() {
   const [configDraft, setConfigDraft] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [logLines, setLogLines] = useState<LogLine[]>([]);
-  const [alertImgs, setAlertImgs] = useState<{ name: string; url: string }[]>([]);
+  const [alertImgs, setAlertImgs] = useState<{ name: string; url: string; when: string }[]>([]);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewState, setPreviewState] = useState<"off" | "connecting" | "live" | "stale" | "disconnected">("off");
   const [crashInfo, setCrashInfo] = useState<{ exit_code: number | null; stderr_tail: string[] } | null>(null);
@@ -73,7 +76,9 @@ export default function App() {
         setRunning(s.running);
         setPid(s.pid);
         setConfigPath(s.config_path);
-        setProjectRoot(s.project_root);
+        // audit #50: projectRoot is unused; drop the state to satisfy
+        // noUnusedLocals. The path is already visible in the preview
+        // bar (`config: ${configPath}`) and the StatusBar.
         setLogLines(s.log_lines || []);
       } catch (e) {
         setFooterMsg(`status: ${e}`);
@@ -229,7 +234,6 @@ export default function App() {
     // already. If it does, "Reset to defaults" with a destructive
     // confirm; if not, "Create config" with no confirm at all.
     const isFresh = !currentConfig.trim();
-    const label = isFresh ? "Create config.yaml" : "Reset to defaults";
     if (!isFresh) {
       const ok = window.confirm(
         "Reset config.yaml to defaults from config.example.yaml? " +
@@ -283,6 +287,17 @@ export default function App() {
       setFooterMsg(`resolution ${w}×${h} saved — restart guardian to apply`);
     } catch (e) {
       setFooterMsg(`set_resolution: ${e}`);
+    }
+  };
+
+  // ----- log clear (audit #50 follow-on) -----
+  const clearLog = async () => {
+    try {
+      await tauri.clearLog();
+      setLogLines([]);
+      setFooterMsg("log cleared");
+    } catch (e) {
+      setFooterMsg(`clearLog: ${e}`);
     }
   };
 
@@ -561,7 +576,7 @@ export default function App() {
                     <span className="mr-2 text-grey">
                       {new Date(l.ts).toLocaleTimeString()}
                     </span>
-                    <span className="break-all">{escapeHtml(JSON.stringify(l.payload))}</span>
+                    <span className="break-all">{JSON.stringify(l.payload)}</span>
                   </div>
                 ))}
               </div>
