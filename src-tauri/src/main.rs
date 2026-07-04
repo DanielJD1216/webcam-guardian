@@ -378,7 +378,15 @@ fn parse_event_line(line: &str) -> Option<LogLine> {
 }
 
 async fn tail_events(app: AppHandle, events_path: PathBuf, state: Arc<GuardianState>) {
-    let _ = std::fs::File::create(&events_path).ok();
+    // audit #9b: was `File::create` (truncates!) — switching to
+    // OpenOptions::append so the 'append-only crash-safe' log survives
+    // every app launch. Touch the file if it doesn't exist.
+    if !events_path.exists() {
+        if let Some(parent) = events_path.parent() {
+            let _ = tokio::fs::create_dir_all(parent).await;
+        }
+        let _ = tokio::fs::File::create(&events_path).await;
+    }
     let mut last_line_count: usize = 0;
     loop {
         tokio::time::sleep(Duration::from_millis(800)).await;

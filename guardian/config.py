@@ -166,11 +166,18 @@ def _escalation(raw: dict) -> EscalationCfg:
 
 
 def _detective(raw: dict) -> DetectiveCfg:
+    # audit #70: was `or DEFAULT` which made it impossible to clear
+    # the thinking-toggle default via config (empty dict is falsy in
+    # the `or` chain). Use explicit None check so `extra_body: {}`
+    # in YAML legitimately clears the default.
+    eb = raw.get("extra_body")
+    if eb is None:
+        eb = {"thinking": {"type": "disabled"}}
     return DetectiveCfg(
         base_url=str(raw.get("base_url", "https://api.minimax.io/v1")),
         model=str(raw.get("model", "MiniMax-M3")),
         api_key_env=str(raw.get("api_key_env", "MINIMAX_API_KEY")),
-        extra_body=dict(raw.get("extra_body") or {"thinking": {"type": "disabled"}}),
+        extra_body=dict(eb),
         timeout_seconds=int(raw.get("timeout_seconds", 30)),
         max_completion_tokens=int(raw.get("max_completion_tokens", 500)),
         temperature=float(raw.get("temperature", 0.2)),

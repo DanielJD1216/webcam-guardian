@@ -109,6 +109,23 @@ def test_max_detective_calls_per_run_hard_cap():
     assert e.stats.cap_hits >= 1
 
 
+def test_max_detective_calls_per_run_rolls_over_after_one_hour():
+    """Audit #69: cap is rolling-hour, not per-run. After 1h+1s,
+    a previously-capped call must be allowed again."""
+    e = Escalator(debounce_frames=1, cooldown_seconds=0,
+                  max_detective_calls_per_run=2)
+    t0 = 1000.0
+    for _ in range(2):
+        should, labels, _ = e.observe({"person"}, t0)
+        e.on_dispatch(labels, t0)
+        t0 += 1
+    should, labels, _ = e.observe({"person"}, t0)
+    assert should is False, "should hit cap at 2 calls/hour"
+    later = t0 + 3600.0 + 1.0
+    should, labels, _ = e.observe({"person"}, later)
+    assert should is True, "after 1h+1s the rolling window must have rolled"
+
+
 def test_max_alerts_per_hour_caps_alerts_only_not_calls():
     e = Escalator(debounce_frames=1, cooldown_seconds=0,
                   max_alerts_per_hour=2, max_detective_calls_per_run=99)

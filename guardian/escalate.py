@@ -23,7 +23,7 @@ from __future__ import annotations
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import Deque, Iterable
 
 
 @dataclass
@@ -48,11 +48,16 @@ class Escalator:
     ) -> None:
         self.debounce_frames = int(debounce_frames)
         self.cooldown_seconds = int(cooldown_seconds)
+        # audit #69: was a 'per-run' counter that never reset; 24/7
+        # deployments would stop alerting after N calls. Treat as a
+        # rolling-hour budget instead — same cap, same name, but
+        # auto-resets every hour via _call_times.
         self.max_detective_calls_per_run = int(max_detective_calls_per_run)
         self.max_alerts_per_hour = int(max_alerts_per_hour)
 
         self._streak: dict[str, int] = {}
         self._last_call_at: dict[str, float] = {}
+        self._call_times: deque[float] = deque()  # rolling 1h of dispatch ts
         self._alert_times: deque[float] = deque()
         self.stats = EscalationStats()
 
@@ -84,8 +89,12 @@ class Escalator:
         return (len(remaining_per_label) == 0, remaining_per_label)
 
     # --------------------------------------------------------------------- caps
-    def _calls_capped(self) -> bool:
-        return self.stats.calls_dispatched >= self.max_detective_calls_per_run
+    def _calls_capped(self, now: float) -> bool:
+        """Rolling-hour cap (audit #69). Drops entries older than 1h on every check."""
+        hour_ago = now - 3600.0
+        while self._call_times and self._call_times[0] < hour_ago:
+            self._call_times.popleft()
+        return len(self._call_times) >= self.max_detective_calls_per_run
 
     def _alerts_capped(self, now: float) -> bool:
         hour_ago = now - 3600.0
@@ -116,7 +125,7 @@ class Escalator:
             self.stats.cooldown_skips += 1
             return (False, set(eligible), remaining)
 
-        if self._calls_capped():
+        if self._calls_capped(now):
             self.stats.cap_hits += 1
             return (False, set(eligible), remaining)
 
@@ -128,6 +137,7 @@ class Escalator:
             now = time.monotonic()
         for lab in labels:
             self._last_call_at[lab] = now
+        self._call_times.append(now)
         self.stats.calls_dispatched += 1
 
     def on_alert(self, now: float | None = None) -> bool:

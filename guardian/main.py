@@ -39,7 +39,7 @@ from .guard.yolo import YoloGuard
 from .guard.la_client import LocateAnythingGuard
 from .overlay import HudState, draw as draw_overlay, LabelStreakTracker, set_banner
 from .storage import EventLog, snapshot_save
-from .alerts.base import dispatch as dispatch_alerts
+from .alerts.base import dispatch as dispatch_alerts, _sanitize_error
 from .alerts.factory import build_channels
 
 
@@ -203,11 +203,18 @@ class DetectiveWorker(threading.Thread):
                             "ts": datetime.now().isoformat(timespec="seconds"),
                         })
                         continue
-                    snap = None
-                    if self.cfg.alert.attach_snapshot:
-                        snap = snapshot_save(frame, self.cfg.log.snapshots_dir,
-                                              f"alert_{int(time.time()*1000):013d}.jpg")
                     alert_id = f"alert_{int(time.time()*1000):013d}"
+                    snap = None
+                    if self.cfg.alert.attach_snapshot and self.cfg.log.save_escalation_frames:
+                        try:
+                            snap = snapshot_save(frame, self.cfg.log.snapshots_dir,
+                                                  f"{alert_id}.jpg")
+                        except Exception as e:
+                            # audit #17: snapshot failure must NOT drop the
+                            # alert. Log it and continue without a frame.
+                            self.log.log({"type": "snapshot_save_error",
+                                          "alert_id": alert_id,
+                                          "error": _sanitize_error(repr(e))})
                     category = decision.get("category", "alert")
                     title = f"Webcam Guardian · {category}"
                     message = (decision.get("message") or "").strip()
@@ -234,7 +241,8 @@ class DetectiveWorker(threading.Thread):
                     "ts": datetime.now().isoformat(timespec="seconds"),
                 })
             except Exception as e:
-                self.log.log({"type": "detective_error", "error": repr(e),
+                self.log.log({"type": "detective_error",
+                              "error": _sanitize_error(repr(e)),
                               "labels": labels})
 
 
