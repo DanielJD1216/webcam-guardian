@@ -53,15 +53,21 @@ def _ts() -> str:
 
 CAMERA_BACKEND_NAMES = {"auto", "dshow", "msmf", "avfoundation", "v4l2"}
 
-# audit #3 corrected: Tauri webview origin schemes. macOS WKWebView
-# reports `http://tauri.localhost`; Windows/Linux WebView report
-# `tauri://localhost`; some mobile/Android setups send `null`. A
-# real cross-origin web page would send something else and get
-# rejected. An empty Origin (some local CLI clients) is also allowed
-# since the token check below is the actual gate.
+# audit #3 corrected: Tauri webview origin schemes.
+# - Production (bundled app): Tauri registers a custom scheme, so the
+#   webview sends `tauri://localhost` on Windows/Linux or
+#   `http://tauri.localhost` on macOS.
+# - Dev mode: the webview loads from `devUrl` directly, so the Origin
+#   matches the devUrl (default `http://localhost:1420`). The Tauri
+#   Rust side sets `devUrl` in tauri.conf.json — if you change that
+#   port, add the new origin here too.
+# - Some mobile/Android setups send `null`.
+# - Empty Origin: local CLI clients that don't set Origin at all.
 _ALLOWED_WS_ORIGINS = frozenset({
     "http://tauri.localhost",
     "tauri://localhost",
+    "http://localhost:1420",   # Tauri dev mode default devUrl
+    "http://127.0.0.1:1420",   # alt devUrl if user prefers loopback
     "null",
     "",
 })
@@ -161,6 +167,12 @@ class FrameBroadcaster:
             request = conn.request
             origin = (request.headers.get("Origin") or "").strip()
             if origin not in _ALLOWED_WS_ORIGINS:
+                # Loud on stderr so a future Tauri-version change that
+                # shifts the dev origin is immediately diagnosable from
+                # the guardian's stderr log (snapshots/guardian-<pid>.stderr.log
+                # under Tauri; the terminal under python -m guardian).
+                print(f"[ws] reject origin {origin!r} (allowed: "
+                      f"{sorted(_ALLOWED_WS_ORIGINS)})", file=sys.stderr, flush=True)
                 await conn.close(code=1008, reason=f"origin {origin!r} not allowed")
                 return
 

@@ -106,6 +106,32 @@ def test_handler_accepts_tauri_linux_origin(port):
         fb.stop()
 
 
+def test_handler_accepts_tauri_dev_origin(port):
+    """Tauri 2 dev mode loads the webview from devUrl
+    (http://localhost:1420 by default), so Origin: http://localhost:1420
+    must work. Without this, the live-preview pane stays at
+    'Disconnected. Restarting...' in Tauri dev."""
+    from guardian.main import FrameBroadcaster
+
+    fb = FrameBroadcaster(port=port, token="tkn")
+    fb.start()
+    try:
+        assert _wait_for_port("127.0.0.1", port)
+        import websockets
+
+        async def probe():
+            async with websockets.connect(
+                f"ws://127.0.0.1:{port}/?token=tkn",
+                origin="http://localhost:1420",
+            ):
+                return True
+
+        ok = asyncio.run(probe())
+        assert ok
+    finally:
+        fb.stop()
+
+
 def test_handler_accepts_null_origin(port):
     """Some Android/iOS setups send Origin: null — must work."""
     from guardian.main import FrameBroadcaster
