@@ -251,16 +251,38 @@ async fn start(app: AppHandle, state: State<'_, GuardianState>) -> Result<u32, S
     if let Some(out) = child.stdout.take() {
         let path = stdout_log.clone();
         tokio::spawn(async move {
+            // audit #48: simple size-cap rotation. Past 5 MB we rename
+            // the file to .1 and start a new one. Keeps the most recent
+            // window, prevents unbounded growth if any library spams.
+            const MAX_BYTES: u64 = 5 * 1024 * 1024;
             let mut file = match tokio::fs::OpenOptions::new()
                 .create(true).append(true).open(&path).await {
                 Ok(f) => Some(f),
                 Err(_) => None,
             };
+            let mut bytes_written: u64 = file.as_ref().map(|_| 0).unwrap_or(0);
             let mut reader = BufReader::new(out).lines();
             while let Ok(Some(line)) = reader.next_line().await {
                 if let Some(f) = file.as_mut() {
-                    let _ = f.write_all(line.as_bytes()).await;
-                    let _ = f.write_all(b"\n").await;
+                    let n = line.len() as u64 + 1;
+                    if bytes_written + n > MAX_BYTES {
+                        let _ = f.flush().await;
+                        drop(f);
+                        let rotated = path.with_extension(
+                            format!("{}.1", path.extension().and_then(|e| e.to_str()).unwrap_or("log")));
+                        let _ = tokio::fs::rename(&path, &rotated).await;
+                        match tokio::fs::OpenOptions::new()
+                            .create(true).append(true).open(&path).await {
+                            Ok(f) => file = Some(f),
+                            Err(_) => file = None,
+                        }
+                        bytes_written = 0;
+                    }
+                    if let Some(f) = file.as_mut() {
+                        let _ = f.write_all(line.as_bytes()).await;
+                        let _ = f.write_all(b"\n").await;
+                        bytes_written += n;
+                    }
                 }
             }
         });
@@ -268,16 +290,35 @@ async fn start(app: AppHandle, state: State<'_, GuardianState>) -> Result<u32, S
     if let Some(err) = child.stderr.take() {
         let path = stderr_log.clone();
         tokio::spawn(async move {
+            const MAX_BYTES: u64 = 5 * 1024 * 1024;
             let mut file = match tokio::fs::OpenOptions::new()
                 .create(true).append(true).open(&path).await {
                 Ok(f) => Some(f),
                 Err(_) => None,
             };
+            let mut bytes_written: u64 = file.as_ref().map(|_| 0).unwrap_or(0);
             let mut reader = BufReader::new(err).lines();
             while let Ok(Some(line)) = reader.next_line().await {
                 if let Some(f) = file.as_mut() {
-                    let _ = f.write_all(line.as_bytes()).await;
-                    let _ = f.write_all(b"\n").await;
+                    let n = line.len() as u64 + 1;
+                    if bytes_written + n > MAX_BYTES {
+                        let _ = f.flush().await;
+                        drop(f);
+                        let rotated = path.with_extension(
+                            format!("{}.1", path.extension().and_then(|e| e.to_str()).unwrap_or("log")));
+                        let _ = tokio::fs::rename(&path, &rotated).await;
+                        match tokio::fs::OpenOptions::new()
+                            .create(true).append(true).open(&path).await {
+                            Ok(f) => file = Some(f),
+                            Err(_) => file = None,
+                        }
+                        bytes_written = 0;
+                    }
+                    if let Some(f) = file.as_mut() {
+                        let _ = f.write_all(line.as_bytes()).await;
+                        let _ = f.write_all(b"\n").await;
+                        bytes_written += n;
+                    }
                 }
             }
         });
@@ -313,11 +354,19 @@ async fn start(app: AppHandle, state: State<'_, GuardianState>) -> Result<u32, S
                 // token mutex — we'd need a separate signal. But the
                 // token is meaningless once the child has died, and
                 // the next start() rotates it.)
-                let tail = tokio::fs::read_to_string(&stderr_log_for_crash)
-                    .await
-                    .unwrap_or_default();
-                let last_lines: Vec<String> = tail.lines().rev().take(50).map(String::from).collect();
-                let last_lines: Vec<String> = last_lines.into_iter().rev().collect();
+                // audit #49: read the last 64 KiB of stderr instead of
+                // the whole file. Avoids unbounded RAM when the log
+                // has grown large. (.1 is the rotated file from
+                // #48 — we don't touch it here, the live log is the
+                // signal we want.)
+                const CRASH_TAIL_BYTES: u64 = 64 * 1024;
+                let last_lines: Vec<String> = match read_tail(
+                    &stderr_log_for_crash, CRASH_TAIL_BYTES,
+                ).await {
+                    Ok(s) => s.lines().rev().take(50).map(String::from)
+                        .collect::<Vec<_>>().into_iter().rev().collect(),
+                    Err(_) => Vec::new(),
+                };
                 let payload = serde_json::json!({
                     "exit_code": status.code(),
                     "stderr_tail": last_lines,
@@ -547,6 +596,26 @@ async fn tail_events(app: AppHandle, events_path: PathBuf, state: Arc<GuardianSt
         let snapshot = state.log_tail.lock().await.clone();
         app.emit("guardian:events", &snapshot).ok();
     }
+}
+
+async fn read_tail(path: &PathBuf, max_bytes: u64) -> std::io::Result<String> {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    let mut f = tokio::fs::File::open(path).await?;
+    let len = f.metadata().await?.len();
+    let start = len.saturating_sub(max_bytes);
+    f.seek(std::io::SeekFrom::Start(start)).await?;
+    let mut buf = Vec::with_capacity((len - start) as usize);
+    f.read_to_end(&mut buf).await?;
+    // Drop the partial first line so the tail begins on a line
+    // boundary (audit #49). If the file is exactly max_bytes or
+    // smaller, we read the whole thing and accept a leading
+    // partial line.
+    if start > 0 {
+        if let Some(nl) = buf.iter().position(|&b| b == b'\n') {
+            buf.drain(..=nl);
+        }
+    }
+    Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
 #[tokio::main]

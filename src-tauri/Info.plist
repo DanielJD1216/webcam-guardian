@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Webcam Guardian</string>
+    <key>CFBundleDisplayName</key>
+    <string>Webcam Guardian</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.danieljd1216.webcamguardian</string>
+    <key>CFBundleVersion</key>
+    <string>0.2.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.2.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <!--
+        Audit #41: macOS attributes the child Python process's
+        camera use to the responsible .app bundle, which must
+        declare NSCameraUsageDescription or the access is denied
+        (and on macOS 15+ there's no right-click → Open bypass).
+        Without this, a bundled build would never show a TCC
+        prompt and would silently fail to capture.
+    -->
+    <key>NSCameraUsageDescription</key>
+    <string>Webcam Guardian uses the camera to detect people and other activity in your chosen field of view, then alerts you via Telegram and email when it sees something worth checking.</string>
+    <!-- Required for AppleScript / accessibility when an alert is being read aloud (planned in a later wave). -->
+    <key>NSAppleScriptEnabled</key>
+    <false/>
+    <key>NSUserNotificationAlertStyle</key>
+    <string>alert</string>
+</dict>
+</plist>

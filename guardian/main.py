@@ -278,14 +278,38 @@ class DetectiveWorker(threading.Thread):
                     message = (decision.get("message") or "").strip()
                     reason = (decision.get("reason") or "").strip()
                     body = message or reason or f"{category} detected"
-                    dispatch_alerts(self.channels, alert_id, title, body,
-                                    str(snap) if snap else None, self.log)
-                    self.log.log({"type": "alert_dispatched",
-                                  "alert_id": alert_id,
-                                  "category": category,
-                                  "decision": decision,
-                                  "snapshot": str(snap) if snap else None,
-                                  "channels": [getattr(ch, "name", "?") for ch in self.channels]})
+                    # audit #61: only credit the hourly alert cap if
+                    # at least one channel delivered (or we retried
+                    # the transient network and all failed). The
+                    # dispatch() helper handles per-channel retry +
+                    # error sanitization.
+                    delivery = dispatch_alerts(
+                        self.channels, alert_id, title, body,
+                        str(snap) if snap else None, self.log,
+                    )
+                    if delivery["delivered"]:
+                        self.log.log({
+                            "type": "alert_dispatched",
+                            "alert_id": alert_id,
+                            "category": category,
+                            "decision": decision,
+                            "snapshot": str(snap) if snap else None,
+                            "delivered": delivery["delivered"],
+                            "failed": delivery["failed"],
+                        })
+                    else:
+                        # every channel errored even after retries;
+                        # do NOT credit the hourly cap (user got no
+                        # alert) — log a distinct event so auditing
+                        # can distinguish a real successful alert
+                        # from a fully-failed one.
+                        self.log.log({
+                            "type": "alert_delivery_failed",
+                            "alert_id": alert_id,
+                            "category": category,
+                            "decision": decision,
+                            "channels": delivery["failed"],
+                        })
                 self.log.log({
                     "type": "detective_result",
                     "labels": labels,
