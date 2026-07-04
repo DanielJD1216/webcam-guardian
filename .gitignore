@@ -11,6 +11,11 @@ events.jsonl
 events.*.jsonl
 snapshots/
 *.log
+# E2E artifacts (scripts/run_e2e.py)
+events_e2e*.jsonl
+snapshots_e2e*/
+events_debug*.jsonl
+snapshots_debug*/
 
 # python
 .venv*/

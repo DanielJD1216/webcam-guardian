@@ -264,10 +264,11 @@ class DetectiveWorker(threading.Thread):
                 # most-recently-saved frame is included in the alert
                 # delivery. The two are no longer conflated.
                 escalation_id = f"escalation_{int(time.time()*1000):013d}"
+                snap_dir = Path(self.cfg.log.snapshots_dir)  # e2e/a78: was str→str TypeError when alert.attach_snapshot=True and save_escalation_frames=True
                 if self.cfg.log.save_escalation_frames:
                     try:
                         snapshot_save(
-                            frame, self.cfg.log.snapshots_dir,
+                            frame, snap_dir,
                             f"{escalation_id}.jpg",
                         )
                     except Exception as e:
@@ -291,11 +292,11 @@ class DetectiveWorker(threading.Thread):
                         # name keeps the alert gallery organized. If
                         # save_escalation_frames is off, save fresh.
                         if self.cfg.log.save_escalation_frames:
-                            snap = self.cfg.log.snapshots_dir / f"{escalation_id}.jpg"
+                            snap = snap_dir / f"{escalation_id}.jpg"
                         else:
                             try:
                                 snap = snapshot_save(
-                                    frame, self.cfg.log.snapshots_dir,
+                                    frame, snap_dir,
                                     f"{alert_id}.jpg",
                                 )
                             except Exception as e:

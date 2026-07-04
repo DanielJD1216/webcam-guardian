@@ -173,9 +173,28 @@ Done in Wave 3:
         auto-rewritten to rgb(r g b / <alpha>) so bg-cyan/10
         produces the right alpha.
 
-## Wave 10 (planned)
+## Wave 10 (done — partial)
 
-- #66 (full) — GDPR face-blur in stored snapshots
+- [x] #66 (partial) — `blur_person_boxes(frame, boxes, top_fraction)`
+        utility in `guardian/storage.py` (PR #1, merged `cb259b2`).
+        Pure helper that returns a copy of `frame` with the top fraction
+        of each RT-DETR person box Gaussian-blurred. Boxes clip to
+        frame bounds; empty/0-fraction inputs pass through unchanged.
+        5 tests in `tests/test_blur.py`. Integration through the
+        live snapshot/save path stays as a follow-up.
+- [x] **#a78 (new — caught by E2E)** — DetectiveWorker alert path
+        crashed at `cfg.log.snapshots_dir / "alert_...jpg"` whenever
+        `alert.attach_snapshot=True` AND `log.save_escalation_frames=True`
+        (production defaults). Root cause: `LogCfg.snapshots_dir` is
+        typed `str` (loaded from YAML); the worker treated it as a
+        Path object. Fix in `guardian/main.py`: wrap with `Path()`
+        once at the top of the alert block. Regression test
+        `tests/test_worker_path.py` exercises this exact combination.
+
+## Wave 11 (planned)
+
+- #66 (full) — wire `blur_person_boxes` into the snapshot/save path
+  with a config flag and per-event opt-out
 - #54 follow-up — `default=str` is a footgun (review suggested)
 
 ## Lower-priority
