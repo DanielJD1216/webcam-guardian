@@ -30,6 +30,9 @@ export const tauri = {
   readConfig: () => invoke<string>("read_config"),
   writeConfig: (contents: string) => invoke<void>("write_config", { contents }),
   resetConfigFromExample: () => invoke<string>("reset_config_from_example"),
+  setCameraIndex: (newIndex: number) => invoke<string>("set_camera_index", { newIndex }),
+  setResolution: (width: number, height: number) =>
+    invoke<string>("set_resolution", { width, height }),
   clearLog: () => invoke<void>("clear_log"),
   listCameras: () => invoke<CameraOption[]>("list_cameras"),
   listAlerts: () => invoke<AlertItem[]>("list_alerts"),

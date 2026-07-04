@@ -158,7 +158,29 @@ export default function App() {
       setFooterMsg(`list_cameras: ${e}`);
     }
   };
-  useEffect(() => { rescanCameras(); }, []);
+  useEffect(() => {
+    // audit #27: load config + cameras on mount. If config is
+    // missing or empty, auto-create from the example so the pickers
+    // and editor are populated.
+    (async () => {
+      try {
+        let c = await tauri.readConfig();
+        if (!c || c.trim() === "") {
+          c = await tauri.resetConfigFromExample();
+          setFooterMsg(`config auto-created from example (${c.length} chars)`);
+        }
+        setCurrentConfig(c);
+        setConfigDraft(c);
+        const idx = getConfigCameraIndex(c);
+        if (idx != null) setCameraIdx(idx);
+        const r = parseConfigResolution(c);
+        if (r) setResolution(r);
+      } catch (e) {
+        setFooterMsg(`mount load: ${e}`);
+      }
+    })();
+    rescanCameras();
+  }, []);
 
   // ----- config -----
   const reloadConfig = async () => {
@@ -217,45 +239,38 @@ export default function App() {
   };
 
   const onCameraChange = async (newIdx: number) => {
-    const replaced = currentConfig.replace(
-      /(^camera:[^\n]*\n[^\n]*index:\s*)\d+/m,
-      `$1${newIdx}`,
-    );
-    const finalCfg = replaced === currentConfig
-      ? currentConfig.replace(/(^camera:[^\n]*\n)/, `$1  index: ${newIdx}\n`)
-      : replaced;
-    setCurrentConfig(finalCfg);
-    setConfigDraft(finalCfg);
+    if (!currentConfig.trim()) {
+      setFooterMsg("config is empty — click Reset to create one first");
+      return;
+    }
     setCameraIdx(newIdx);
     try {
-      await tauri.writeConfig(finalCfg);
+      const fresh = await tauri.setCameraIndex(newIdx);
+      setCurrentConfig(fresh);
+      setConfigDraft(fresh);
       setFooterMsg(`camera switched to index ${newIdx} — restart guardian to apply`);
     } catch (e) {
-      setFooterMsg(`write_config: ${e}`);
+      setFooterMsg(`set_camera_index: ${e}`);
     }
   };
 
   const onResolutionChange = async (val: string) => {
+    if (!currentConfig.trim()) {
+      setFooterMsg("config is empty — click Reset to create one first");
+      return;
+    }
     const m = val.match(/^(\d+)x(\d+)$/);
     if (!m) return;
     const w = parseInt(m[1], 10);
     const h = parseInt(m[2], 10);
     setResolution({ w, h });
-    let newCfg = currentConfig.replace(/(^camera:[^\n]*\n[^\n]*width:\s*)\d+/m, `$1${w}`);
-    if (newCfg === currentConfig) {
-      newCfg = currentConfig.replace(/(^camera:[^\n]*\n)/, `$1  width: ${w}\n`);
-    }
-    newCfg = newCfg.replace(/(^camera:[^\n]*\n[^\n]*height:\s*)\d+/m, `$1${h}`);
-    if (newCfg === currentConfig) {
-      newCfg = currentConfig.replace(/(^camera:[^\n]*\n)/, `$1  height: ${h}\n`);
-    }
-    setCurrentConfig(newCfg);
-    setConfigDraft(newCfg);
     try {
-      await tauri.writeConfig(newCfg);
+      const fresh = await tauri.setResolution(w, h);
+      setCurrentConfig(fresh);
+      setConfigDraft(fresh);
       setFooterMsg(`resolution ${w}×${h} saved — restart guardian to apply`);
     } catch (e) {
-      setFooterMsg(`write_config: ${e}`);
+      setFooterMsg(`set_resolution: ${e}`);
     }
   };
 
@@ -459,7 +474,7 @@ export default function App() {
               <div className="mb-2 flex items-center justify-between">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-dim">Live log</h3>
                 <button
-                  onClick={() => setLogLines([])}
+                  onClick={clearLog}
                   className="text-[10px] text-grey hover:text-text"
                 >
                   Clear

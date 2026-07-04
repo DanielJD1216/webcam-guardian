@@ -13,7 +13,6 @@ use tokio::time::Duration;
 #[derive(Default)]
 struct GuardianState {
     child: Arc<Mutex<Option<Child>>>,
-    events_path: Arc<Mutex<PathBuf>>,
     log_tail: Arc<Mutex<Vec<LogLine>>>,
     running: Arc<Mutex<bool>>,
     ws_token: Arc<Mutex<Option<String>>>,
@@ -56,12 +55,18 @@ struct Status {
 
 fn find_python_and_root() -> (PathBuf, PathBuf) {
     let cwd = std::env::current_dir().unwrap_or(PathBuf::from("."));
+    // audit #44: was Unix-only (.venv/bin/python). Windows venvs
+    // are at .venv\Scripts\python.exe. Probe both layouts at every
+    // level so the same code works on dev checkouts on Mac, Linux, and
+    // Windows.
     let candidates_at = |base: &PathBuf| -> Vec<PathBuf> {
         vec![
             base.join(".venv/bin/python"),
             base.join(".venv/bin/python3"),
+            base.join(".venv/Scripts/python.exe"),
             base.join(".venv-sys/bin/python"),
             base.join(".venv-sys/bin/python3"),
+            base.join(".venv-sys/Scripts/python.exe"),
         ]
     };
     let mut base = cwd.clone();
@@ -86,7 +91,10 @@ fn find_python_and_root() -> (PathBuf, PathBuf) {
             }
         }
     }
-    (PathBuf::from("python3"), cwd)
+    // Fallback interpreter name is platform-appropriate: Windows uses
+    // `python` (the launcher) or `python3`; Unix uses `python3`.
+    let py = if cfg!(windows) { "python" } else { "python3" };
+    (PathBuf::from(py), cwd)
 }
 
 fn project_root() -> PathBuf {
@@ -170,7 +178,6 @@ async fn status(state: State<'_, GuardianState>) -> Result<Status, String> {
         Err(_) => Vec::new(),
     };
     let ws_token = state.ws_token.lock().await.clone();
-    let _ = state;
     Ok(Status { running, pid, project_root: root, config_path, events_path, snapshots_dir, log_lines, ws_token })
 }
 
@@ -422,6 +429,61 @@ async fn reset_config_from_example() -> Result<String, String> {
     Ok(contents)
 }
 
+/// audit #47: structured YAML-aware mutation. Replaces the
+/// regex-edit pattern in the UI that produced dead duplicate keys
+/// on the shipped config. Writes atomically (write to .tmp, then
+/// rename) so a crash mid-write can't truncate the file.
+#[tauri::command]
+async fn set_camera_index(new_index: i64) -> Result<String, String> {
+    let root = project_root();
+    let path = root.join("config.yaml");
+    set_yaml_key(&path, &["camera", "index"], serde_yaml::Value::Number(new_index.into())).await?;
+    tokio::fs::read_to_string(&path).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_resolution(width: i64, height: i64) -> Result<String, String> {
+    let root = project_root();
+    let path = root.join("config.yaml");
+    set_yaml_key(&path, &["camera", "width"],  serde_yaml::Value::Number(width.into())).await?;
+    set_yaml_key(&path, &["camera", "height"], serde_yaml::Value::Number(height.into())).await?;
+    tokio::fs::read_to_string(&path).await.map_err(|e| e.to_string())
+}
+
+async fn set_yaml_key(path: &PathBuf, keys: &[&str], value: serde_yaml::Value) -> Result<(), String> {
+    let contents = tokio::fs::read_to_string(path).await
+        .map_err(|e| format!("read {}: {}", path.display(), e))?;
+    if contents.trim().is_empty() {
+        return Err("config is empty — click Reset first".into());
+    }
+    let mut doc: serde_yaml::Value = serde_yaml::from_str(&contents)
+        .map_err(|e| format!("parse {}: {}", path.display(), e))?;
+
+    let mut cur: &mut serde_yaml::Value = &mut doc;
+    for k in keys {
+        // Ensure the parent path is a mapping, replacing any
+        // existing scalar/sequence with a fresh mapping.
+        if !matches!(cur, serde_yaml::Value::Mapping(_)) {
+            *cur = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
+        }
+        let map = cur.as_mapping_mut().unwrap();
+        cur = map
+            .entry(serde_yaml::Value::String((*k).into()))
+            .or_insert(serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
+    }
+    *cur = value;
+
+    // Serialize and write atomically: write to .tmp, then rename over.
+    let serialized = serde_yaml::to_string(&doc)
+        .map_err(|e| format!("serialize: {}", e))?;
+    let tmp = path.with_extension("yaml.tmp");
+    tokio::fs::write(&tmp, &serialized).await
+        .map_err(|e| format!("write {}: {}", tmp.display(), e))?;
+    tokio::fs::rename(&tmp, path).await
+        .map_err(|e| format!("rename: {}", e))?;
+    Ok(())
+}
+
 fn parse_pair(s: Option<&str>) -> Option<(i64, i64)> {
     let s = s?;
     let mut it = s.split('x');
@@ -433,9 +495,22 @@ fn parse_pair(s: Option<&str>) -> Option<(i64, i64)> {
 fn parse_event_line(line: &str) -> Option<LogLine> {
     let v: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
     let ts_str = v.get("ts").and_then(|x| x.as_str()).unwrap_or("");
-    let ts: DateTime<Utc> = DateTime::parse_from_rfc3339(ts_str)
-        .map(|d| d.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
+    // audit #63: try RFC3339-with-offset first, then naive ISO
+    // (Python's datetime.now(timezone.utc).isoformat() produces
+    // offset-less UTC for some Python versions), then fall back to
+    // None (the UI will render a blank ts instead of fabricating
+    // a wrong one — fabricated timestamps in an audit log are
+    // nearly as bad as no log).
+    let ts = if !ts_str.is_empty() {
+        DateTime::parse_from_rfc3339(ts_str)
+            .map(|d| d.with_timezone(&Utc))
+            .ok()
+            .or_else(|| chrono::NaiveDateTime::parse_from_str(ts_str, "%Y-%m-%dT%H:%M:%S").ok().map(|n| DateTime::<Utc>::from_naive_utc_and_offset(n, Utc)))
+            .or_else(|| chrono::NaiveDateTime::parse_from_str(ts_str, "%Y-%m-%dT%H:%M:%S%.f").ok().map(|n| DateTime::<Utc>::from_naive_utc_and_offset(n, Utc)))
+    } else {
+        None
+    };
+    let ts = ts.unwrap_or_else(|| Utc::now() - chrono::Duration::days(365 * 100));  // sentinel: year 1926
     let event_type = v.get("type").and_then(|x| x.as_str()).unwrap_or("").to_string();
     Some(LogLine { ts, event_type, payload: v })
 }
@@ -485,14 +560,14 @@ async fn main() {
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             status, start, stop, read_config, write_config,
-            clear_log, list_cameras, list_alerts, reset_config_from_example
+            clear_log, list_cameras, list_alerts, reset_config_from_example,
+            set_camera_index, set_resolution
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
             let state_handle: State<GuardianState> = handle.state();
             let arc_state = GuardianState {
                 child: state_handle.child.clone(),
-                events_path: state_handle.events_path.clone(),
                 log_tail: state_handle.log_tail.clone(),
                 running: state_handle.running.clone(),
                 ws_token: state_handle.ws_token.clone(),

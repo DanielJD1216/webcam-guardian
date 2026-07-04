@@ -26,6 +26,7 @@ from typing import Optional
 
 import cv2
 import psutil
+from datetime import timezone
 from dotenv import load_dotenv
 
 from . import __version__
@@ -41,6 +42,13 @@ from .overlay import HudState, draw as draw_overlay, LabelStreakTracker, set_ban
 from .storage import EventLog, snapshot_save
 from .alerts.base import dispatch as dispatch_alerts, _sanitize_error
 from .alerts.factory import build_channels
+
+
+def _ts() -> str:
+    """Audit #63: timezone-aware ISO 8601 (UTC) so the Rust side's
+    RFC3339 parser doesn't fall back to Utc::now() on every event.
+    UI converts to local for display."""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 CAMERA_BACKEND_NAMES = {"auto", "dshow", "msmf", "avfoundation", "v4l2"}
@@ -229,7 +237,7 @@ class DetectiveWorker(threading.Thread):
             return True
         except queue.Full:
             self.log.log({"type": "detective_queue_full",
-                          "ts": datetime.now().isoformat(timespec="seconds")})
+                          "ts": _ts()})
             return False
 
     def stop(self) -> None:
@@ -250,7 +258,7 @@ class DetectiveWorker(threading.Thread):
                     if not self.escalator.on_alert(time.monotonic()):
                         self.log.log({
                             "type": "alert_cap_hit",
-                            "ts": datetime.now().isoformat(timespec="seconds"),
+                            "ts": _ts(),
                         })
                         continue
                     alert_id = f"alert_{int(time.time()*1000):013d}"
@@ -288,7 +296,7 @@ class DetectiveWorker(threading.Thread):
                     "raw_finish_reason": res.raw_finish_reason,
                     "parse_error": res.parse_error,
                     "tool_call_accepted": res.tool_call_accepted,
-                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "ts": _ts(),
                 })
             except Exception as e:
                 self.log.log({"type": "detective_error",
@@ -393,7 +401,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     log.log({"type": "startup", "version": __version__,
              "guard": cfg.guard.backend, "detective": cfg.detective.model,
              "device": resolve_device(cfg.guard.device),
-             "ts": datetime.now().isoformat(timespec="seconds")})
+             "ts": _ts()})
 
     backend = _camera_backend(cfg.camera.backend)
     try:
@@ -464,7 +472,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                         "type": "camera_stalled",
                         "last_seq": seq,
                         "since_s": round(now - (cap_t or now), 1),
-                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "ts": _ts(),
                     })
                     last_stall_log_ts = now
             else:
@@ -487,7 +495,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                                    seconds=2.0)
                         log.log({"type": "escalation_dispatched", "labels": sorted(labels),
                                  "frame": frames_seen,
-                                 "ts": datetime.now().isoformat(timespec="seconds")})
+                                 "ts": _ts()})
                 last_analysis = now
                 if isinstance(guard, LocateAnythingGuard):
                     guard.submit_frame(frame)
@@ -545,7 +553,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         guard.close()
         cam.release()
         cv2.destroyAllWindows()
-        log.log({"type": "shutdown", "ts": datetime.now().isoformat(timespec="seconds"),
+        log.log({"type": "shutdown", "ts": _ts(),
                  "stats": escalator.stats.__dict__,
                  "frames": frames_seen,
                  "elapsed_s": round(time.monotonic() - t_start, 2)})
