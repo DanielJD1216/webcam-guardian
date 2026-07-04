@@ -175,6 +175,9 @@ class FrameBroadcaster:
                       f"{sorted(_ALLOWED_WS_ORIGINS)})", file=sys.stderr, flush=True)
                 await conn.close(code=1008, reason=f"origin {origin!r} not allowed")
                 return
+            # DEBUG: log accepted connections too so we can confirm
+            # the path is hit. Removed once #a80 is fully verified.
+            print(f"[ws] accept origin {origin!r}", file=sys.stderr, flush=True)
 
             qs = parse_qs(request.path.split("?", 1)[1] if "?" in request.path else "")
             presented = (qs.get("token", [None])[0] or "").strip()
@@ -591,17 +594,28 @@ def main(argv: Optional[list[str]] = None) -> int:
             # audit #1: if the camera isn't producing fresh frames,
             # log a stall event (throttled to once per 5 s). Without
             # this the guardian happily re-analyzes a frozen frame.
+            #
+            # The audit #1 check used `seq == last_frame_seq` as the
+            # "is the frame stale" signal. That fires when the main
+            # loop polls faster than the camera produces (which is
+            # the *normal* case — 100 Hz loop vs 30 Hz camera). The
+            # real signal is the capture_monotonic timestamp: if
+            # `now - cap_t > 1.0`, the camera genuinely hasn't
+            # produced a fresh frame in over a second, and that is
+            # the actual stall we want to log. (a83)
+            #
             # audit #62: after ~5 s of no new frames, also dispatch
             # an infra alert (bypassing the detective) so the user
             # is told the system is blind. When frames resume, fire a
             # "camera restored" alert and reset the flag.
-            if seq == last_frame_seq and now - t_start > 1.0:
+            is_stale_frame = (cap_t > 0.0 and (now - cap_t) > 1.0)
+            if is_stale_frame:
                 if camera_lost_at == 0.0:
                     camera_lost_at = now
                 since = now - (cap_t or camera_lost_at)
                 if since > 5.0 and not camera_lost_alerted:
                     camera_lost_alerted = True
-                    self.log.log({
+                    log.log({
                         "type": "camera_lost",
                         "since_s": round(since, 1),
                         "ts": _ts(),
@@ -618,22 +632,23 @@ def main(argv: Optional[list[str]] = None) -> int:
                         f"camera_offline_{int(now*1000):013d}",
                         "Webcam Guardian · camera_offline",
                         offline_msg,
-                        None, self.log,
+                        None, log,
                     )
                 if now - last_stall_log_ts > 5.0:
                     log.log({
                         "type": "camera_stalled",
                         "last_seq": seq,
-                        "since_s": round(now - (cap_t or now), 1),
+                        "since_s": round(since, 1),
                         "ts": _ts(),
                     })
                     last_stall_log_ts = now
+                last_frame_seq = seq  # keep last_frame_seq current even when stale
             else:
                 last_frame_seq = seq
                 if camera_lost_alerted:
                     from datetime import datetime
                     recovered_at = datetime.now().astimezone().strftime('%H:%M %Z')
-                    self.log.log({
+                    log.log({
                         "type": "camera_restored",
                         "ts": _ts(),
                     })
@@ -642,7 +657,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                         f"camera_restored_{int(now*1000):013d}",
                         "Webcam Guardian · camera_restored",
                         f"Camera signal recovered at {recovered_at}.",
-                        None, self.log,
+                        None, log,
                     )
                     camera_lost_at = 0.0
                     camera_lost_alerted = False

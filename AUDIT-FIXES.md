@@ -218,6 +218,21 @@ Done in Wave 3:
         match, reject immediately. The 2-second wait_for now runs
         only when no URL token was presented (clients that can only
         send the token as the first message).
+- [x] **#a82 (new — follow-on from a80)** — Tauri 2 dev mode loads
+        the webview directly from `devUrl` (`http://localhost:1420`),
+        so the browser sends `Origin: http://localhost:1420`.
+        Whitelist didn't include the dev origin. Added.
+        Plus a stderr log on every rejected connection so future
+        Tauri-version origin shifts are immediately diagnosable.
+- [x] **#a83 (new — caught while reviewing live log)** — The audit
+        #1 stall detector used `seq == last_frame_seq` as the
+        "is the frame stale" signal. With a 100 Hz main loop vs a
+        30 Hz camera, every poll after a fresh frame arrives still
+        returns the same `seq` (the reader thread hasn't advanced
+        yet), so `camera_stalled` events spammed the log every
+        ~5 s even when the camera was perfectly healthy. Fix:
+        use the capture_monotonic timestamp (`now - cap_t > 1.0`)
+        instead of seq-equality as the actual stall signal.
 
 ## Wave 11 (planned)
 
