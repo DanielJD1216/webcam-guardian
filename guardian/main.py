@@ -181,8 +181,6 @@ class FrameBroadcaster:
 
             qs = parse_qs(request.path.split("?", 1)[1] if "?" in request.path else "")
             presented = (qs.get("token", [None])[0] or "").strip()
-            print(f"[ws] token check: server={self.token!r} presented={presented!r} match={presented == self.token}",
-                  file=sys.stderr, flush=True)
             if self.token:
                 if presented == self.token:
                     pass  # URL-token match — proceed.
@@ -202,27 +200,15 @@ class FrameBroadcaster:
                     # Wrong token presented in URL — reject immediately.
                     # Don't burn 2 s on the wait_for fallback: presenting
                     # a wrong token is a hard fail, not a soft one.
-                    print(f"[ws] reject: token mismatch (presented={presented!r})",
-                          file=sys.stderr, flush=True)
                     await conn.close(code=1008, reason="bad token")
                     return
 
             self._clients.add(conn)
-            print(f"[ws] client added (n={len(self._clients)})", file=sys.stderr, flush=True)
             try:
-                async for msg in conn:
-                    # DEBUG: surface any message the client sends so we
-                    # can see if the UI is sending keepalives or
-                    # close handshakes that we didn't expect.
-                    print(f"[ws] msg from client: {msg!r}",
-                          file=sys.stderr, flush=True)
-            except Exception as e:
-                print(f"[ws] client loop exception: {e!r}",
-                      file=sys.stderr, flush=True)
+                async for _ in conn:
+                    pass
             finally:
                 self._clients.discard(conn)
-                print(f"[ws] client removed (n={len(self._clients)})",
-                      file=sys.stderr, flush=True)
 
         async def periodic():
             while not self._stopped.is_set():
@@ -245,9 +231,7 @@ class FrameBroadcaster:
                 for c in list(self._clients):
                     try:
                         await c.send(payload)
-                    except Exception as e:
-                        print(f"[ws] send failed: {e!r}",
-                              file=sys.stderr, flush=True)
+                    except Exception:
                         dead.append(c)
                 for d in dead:
                     self._clients.discard(d)
