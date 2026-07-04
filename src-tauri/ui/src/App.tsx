@@ -392,7 +392,12 @@ export default function App() {
     return buckets;
   }
 
-  useEffect(() => { refreshAlerts(); }, [logLines]);
+  // audit #52 follow-up: the [logLines] effect re-fires refreshAlerts
+  // every status poll (3 s) because setLogLines gives it a brand-new
+  // array each time, and the 5 s interval duplicates that. Run
+  // refreshAlerts only on the interval; the live event push
+  // (onEvents) keeps the log view current without a separate
+  // directory scan.
   useEffect(() => { const i = setInterval(refreshAlerts, 5000); return () => clearInterval(i); }, []);
 
   useEffect(() => {
@@ -560,7 +565,7 @@ export default function App() {
             {/* Config */}
             <Spotlight className="flex flex-col overflow-hidden p-3" spotlightColor="rgba(196,122,0,0.10)">
               <div className="mb-2 flex items-center justify-between">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-dim">Config</h3>
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-accent">Config</h3>
                 <span className="font-mono text-[10px] text-grey">{configPath.split("/").pop()}</span>
               </div>
               <textarea
@@ -592,7 +597,7 @@ export default function App() {
             {/* Log */}
             <Spotlight className="flex min-h-0 flex-1 flex-col overflow-hidden p-3" spotlightColor="rgba(11,128,209,0.10)">
               <div className="mb-2 flex items-center justify-between">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-dim">Live log</h3>
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-accent">Live log</h3>
                 <button
                   onClick={clearLog}
                   className="text-[10px] text-grey hover:text-text"
@@ -644,7 +649,7 @@ export default function App() {
             {/* Alerts */}
             <Spotlight className="flex flex-col overflow-hidden p-3" spotlightColor="rgba(31,143,95,0.10)">
               <div className="mb-2 flex items-center justify-between">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-dim">Alert replay</h3>
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-accent">Alert replay</h3>
                 <button onClick={refreshAlerts} className="text-[10px] text-grey hover:text-text">
                   Refresh
                 </button>

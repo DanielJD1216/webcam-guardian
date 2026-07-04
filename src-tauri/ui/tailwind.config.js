@@ -9,7 +9,10 @@ export default {
         elev: "#f0f2f7",
         line: "#dde2eb",
         text: "#0c1320",
-        dim: "#2667d4",
+        // audit #51 follow-up: was named 'dim' (a dark-theme leftover)
+        // but is a vivid blue used for section headings, not a dim
+        // variant of anything. Renamed to reflect the role.
+        accent: "#2667d4",
         grey: "#6b7589",
         cyan: { DEFAULT: "#0b80d1", dim: "#7fbbe7" },
         yellow: "#c47a00",
